@@ -4,15 +4,22 @@ Route visualization page for MeshCore GUI.
 Standalone NiceGUI page that opens in a new browser tab when a user
 clicks on a message.  Shows a Leaflet map with the message route,
 a hop count summary, and a details table.
+
+v4.1 changes
+~~~~~~~~~~~~~
+- Uses :class:`~meshcore_gui.models.Message` and
+  :class:`~meshcore_gui.models.RouteNode` instead of plain dicts.
 """
 
-from typing import Dict
+from typing import Dict, List
 
 from nicegui import ui
 
-from meshcore_gui.config import TYPE_LABELS, debug_print
-from meshcore_gui.route_builder import RouteBuilder
-from meshcore_gui.protocols import SharedDataReadAndLookup
+from meshcore_gui.gui.constants import TYPE_LABELS
+from meshcore_gui.config import debug_print
+from meshcore_gui.core.models import Message, RouteNode
+from meshcore_gui.services.route_builder import RouteBuilder
+from meshcore_gui.core.protocols import SharedDataReadAndLookup
 
 
 class RoutePage:
@@ -32,27 +39,19 @@ class RoutePage:
     # ------------------------------------------------------------------
 
     def render(self, msg_index: int) -> None:
-        """
-        Render the route page for a specific message.
-
-        Args:
-            msg_index: Index into SharedData.messages list
-        """
         data = self._shared.get_snapshot()
+        messages: List[Message] = data['messages']
 
-        # Validate
-        if msg_index < 0 or msg_index >= len(data['messages']):
+        if msg_index < 0 or msg_index >= len(messages):
             ui.label('❌ Message not found').classes('text-xl p-8')
             return
 
-        msg = data['messages'][msg_index]
+        msg = messages[msg_index]
         route = self._builder.build(msg, data)
 
-        sender = msg.get('sender', 'Unknown')
-        ui.page_title(f'Route — {sender}')
+        ui.page_title(f'Route — {msg.sender or "Unknown"}')
         ui.dark_mode(False)
 
-        # Header
         with ui.header().classes('bg-blue-600 text-white'):
             ui.label('🗺️ MeshCore Route').classes('text-xl font-bold')
 
@@ -60,6 +59,7 @@ class RoutePage:
             self._render_message_info(msg)
             self._render_hop_summary(msg, route)
             self._render_map(data, route)
+            self._render_send_panel(msg, route, data)
             self._render_route_table(msg, data, route)
 
     # ------------------------------------------------------------------
@@ -67,27 +67,25 @@ class RoutePage:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _render_message_info(msg: Dict) -> None:
-        """Message header with sender name and text."""
-        sender = msg.get('sender', 'Unknown')
-        direction = '→ Sent' if msg['direction'] == 'out' else '← Received'
+    def _render_message_info(msg: Message) -> None:
+        sender = msg.sender or 'Unknown'
+        direction = '→ Sent' if msg.direction == 'out' else '← Received'
         ui.label(f'Message Route — {sender} ({direction})').classes('font-bold text-lg')
         ui.label(
-            f"{msg['time']}  {sender}: "
-            f"{msg['text'][:120]}"
+            f"{msg.time}  {sender}: {msg.text[:120]}"
         ).classes('text-sm text-gray-600')
 
     @staticmethod
-    def _render_hop_summary(msg: Dict, route: Dict) -> None:
-        """Hop count banner with SNR and path source."""
+    def _render_hop_summary(msg: Message, route: Dict) -> None:
         msg_path_len = route['msg_path_len']
-        resolved_hops = len(route['path_nodes'])
+        path_nodes: List[RouteNode] = route['path_nodes']
+        resolved_hops = len(path_nodes)
         path_source = route.get('path_source', 'none')
         expected_repeaters = max(msg_path_len - 1, 0)
 
         with ui.card().classes('w-full'):
             with ui.row().classes('items-center gap-4'):
-                if msg['direction'] == 'in':
+                if msg.direction == 'in':
                     if msg_path_len == 0:
                         ui.label('📡 Direct (0 hops)').classes(
                             'text-lg font-bold text-green-600'
@@ -107,7 +105,6 @@ class RoutePage:
                         f'📶 SNR: {route["snr"]:.1f} dB'
                     ).classes('text-sm text-gray-600')
 
-            # Resolution status
             if expected_repeaters > 0 and resolved_hops > 0:
                 source_label = (
                     'from received packet'
@@ -117,8 +114,7 @@ class RoutePage:
                 rpt = 'repeater' if expected_repeaters == 1 else 'repeaters'
                 ui.label(
                     f'✅ {resolved_hops} of {expected_repeaters} '
-                    f'{rpt} identified '
-                    f'({source_label})'
+                    f'{rpt} identified ({source_label})'
                 ).classes('text-xs text-gray-500 mt-1')
             elif msg_path_len > 0 and resolved_hops == 0:
                 ui.label(
@@ -129,12 +125,7 @@ class RoutePage:
 
     @staticmethod
     def _render_map(data: Dict, route: Dict) -> None:
-        """Leaflet map with route markers and polylines.
-
-        Lines are only drawn between nodes that are **adjacent** in the
-        route and both have GPS coordinates.  A node without coordinates
-        breaks the line so that no false connections are shown.
-        """
+        """Leaflet map with route markers and polylines."""
         with ui.card().classes('w-full'):
             if not route['has_locations']:
                 ui.label(
@@ -149,47 +140,34 @@ class RoutePage:
                 center=(center_lat, center_lon), zoom=10
             ).classes('w-full h-96')
 
-            # --- Build ordered list of positions (or None) ---
+            # Build ordered list of positions (or None)
             ordered = []
 
-            # Sender
-            if route['sender']:
-                s = route['sender']
-                if s['lat'] or s['lon']:
-                    ordered.append((s['lat'], s['lon']))
-                else:
-                    ordered.append(None)
+            sender: RouteNode = route['sender']
+            if sender:
+                ordered.append((sender.lat, sender.lon) if sender.has_location else None)
             else:
                 ordered.append(None)
 
-            # Repeaters
             for node in route['path_nodes']:
-                if node['lat'] or node['lon']:
-                    ordered.append((node['lat'], node['lon']))
-                else:
-                    ordered.append(None)
+                ordered.append((node.lat, node.lon) if node.has_location else None)
 
-            # Own position (receiver)
-            if data['adv_lat'] or data['adv_lon']:
-                ordered.append((data['adv_lat'], data['adv_lon']))
+            self_node: RouteNode = route['self_node']
+            if self_node.has_location:
+                ordered.append((self_node.lat, self_node.lon))
             else:
                 ordered.append(None)
 
-            # --- Place markers for all nodes with coordinates ---
             all_points = [p for p in ordered if p is not None]
             for lat, lon in all_points:
                 route_map.marker(latlng=(lat, lon))
 
-            # --- Draw line between all located nodes (skip unknowns) ---
-            # Nodes without coordinates are simply skipped so the line
-            # connects sender → known repeaters → receiver without gaps.
             if len(all_points) >= 2:
                 route_map.generic_layer(
                     name='polyline',
                     args=[all_points, {'color': '#2563eb', 'weight': 3}],
                 )
 
-            # Center map on all located nodes
             if all_points:
                 lats = [p[0] for p in all_points]
                 lons = [p[1] for p in all_points]
@@ -198,10 +176,10 @@ class RoutePage:
                 )
 
     @staticmethod
-    def _render_route_table(msg: Dict, data: Dict, route: Dict) -> None:
-        """Route details table with sender, hops and receiver."""
+    def _render_route_table(msg: Message, data: Dict, route: Dict) -> None:
         msg_path_len = route['msg_path_len']
-        resolved_hops = len(route['path_nodes'])
+        path_nodes: List[RouteNode] = route['path_nodes']
+        resolved_hops = len(path_nodes)
         path_source = route.get('path_source', 'none')
 
         with ui.card().classes('w-full'):
@@ -210,61 +188,55 @@ class RoutePage:
             rows = []
 
             # Sender
-            if route['sender']:
-                s = route['sender']
-                has_loc = s['lat'] != 0 or s['lon'] != 0
+            sender: RouteNode = route['sender']
+            if sender:
                 rows.append({
                     'hop': 'Start',
-                    'name': s['name'],
-                    'hash': s.get('pubkey', '')[:2].upper() if s.get('pubkey') else '-',
-                    'type': TYPE_LABELS.get(s['type'], '-'),
-                    'location': f"{s['lat']:.4f}, {s['lon']:.4f}" if has_loc else '-',
+                    'name': sender.name,
+                    'hash': sender.pubkey[:2].upper() if sender.pubkey else '-',
+                    'type': TYPE_LABELS.get(sender.type, '-'),
+                    'location': f"{sender.lat:.4f}, {sender.lon:.4f}" if sender.has_location else '-',
                     'role': '📱 Sender',
                 })
             else:
-                sender_pubkey = msg.get('sender_pubkey', '')
                 rows.append({
                     'hop': 'Start',
-                    'name': msg.get('sender', 'Unknown'),
-                    'hash': sender_pubkey[:2].upper() if sender_pubkey else '-',
+                    'name': msg.sender or 'Unknown',
+                    'hash': msg.sender_pubkey[:2].upper() if msg.sender_pubkey else '-',
                     'type': '-',
                     'location': '-',
                     'role': '📱 Sender',
                 })
 
-            # Resolved repeaters (from RX_LOG or out_path)
-            for i, node in enumerate(route['path_nodes']):
-                has_loc = node['lat'] != 0 or node['lon'] != 0
+            # Repeaters
+            for i, node in enumerate(path_nodes):
                 rows.append({
                     'hop': str(i + 1),
-                    'name': node['name'],
-                    'hash': node.get('pubkey', '')[:2].upper() if node.get('pubkey') else '-',
-                    'type': TYPE_LABELS.get(node['type'], '-'),
-                    'location': f"{node['lat']:.4f}, {node['lon']:.4f}" if has_loc else '-',
+                    'name': node.name,
+                    'hash': node.pubkey[:2].upper() if node.pubkey else '-',
+                    'type': TYPE_LABELS.get(node.type, '-'),
+                    'location': f"{node.lat:.4f}, {node.lon:.4f}" if node.has_location else '-',
                     'role': '📡 Repeater',
                 })
 
-            # Placeholder rows when no path data was resolved
-            if not route['path_nodes'] and msg_path_len > 0:
+            # Placeholder rows
+            if not path_nodes and msg_path_len > 0:
                 for i in range(msg_path_len):
                     rows.append({
                         'hop': str(i + 1),
-                        'name': '-',
-                        'hash': '-',
-                        'type': '-',
-                        'location': '-',
-                        'role': '📡 Repeater',
+                        'name': '-', 'hash': '-', 'type': '-',
+                        'location': '-', 'role': '📡 Repeater',
                     })
 
             # Own position
-            self_has_loc = data['adv_lat'] != 0 or data['adv_lon'] != 0
+            self_node: RouteNode = route['self_node']
             rows.append({
                 'hop': 'End',
-                'name': data['name'] or 'Me',
+                'name': self_node.name,
                 'hash': '-',
                 'type': 'Companion',
-                'location': f"{data['adv_lat']:.4f}, {data['adv_lon']:.4f}" if self_has_loc else '-',
-                'role': '📱 Receiver' if msg['direction'] == 'in' else '📱 Sender',
+                'location': f"{self_node.lat:.4f}, {self_node.lon:.4f}" if self_node.has_location else '-',
+                'role': '📱 Receiver' if msg.direction == 'in' else '📱 Sender',
             })
 
             ui.table(
@@ -279,8 +251,8 @@ class RoutePage:
                 rows=rows,
             ).props('dense flat bordered').classes('w-full')
 
-            # Footnote based on path_source
-            if msg_path_len == 0 and msg['direction'] == 'in':
+            # Footnotes
+            if msg_path_len == 0 and msg.direction == 'in':
                 ui.label(
                     'ℹ️ Direct message — no intermediate hops.'
                 ).classes('text-xs text-gray-400 italic mt-2')
@@ -296,11 +268,45 @@ class RoutePage:
                 ).classes('text-xs text-gray-400 italic mt-2')
             elif msg_path_len > 0 and resolved_hops == 0:
                 ui.label(
-                    'ℹ️ Repeater identities could not be resolved. '
-                    'RX_LOG correlation may have missed the raw packet, '
-                    'and sender has no stored out_path.'
+                    'ℹ️ Repeater identities could not be resolved.'
                 ).classes('text-xs text-gray-400 italic mt-2')
-            elif msg['direction'] == 'out':
+            elif msg.direction == 'out':
                 ui.label(
                     'ℹ️ Hop information is only available for received messages.'
                 ).classes('text-xs text-gray-400 italic mt-2')
+
+    def _render_send_panel(
+        self, msg: Message, route: Dict, data: Dict,
+    ) -> None:
+        """Send widget pre-filled with route acknowledgement message."""
+        path_hashes = msg.path_hashes
+
+        parts = [f"@[{msg.sender or 'Unknown'}] Received in Zwolle path({msg.path_len})"]
+        if path_hashes:
+            path_str = '>'.join(h.upper() for h in path_hashes)
+            parts.append(f"; {path_str}")
+        prefilled = ''.join(parts)
+
+        ch_options = {
+            ch['idx']: f"[{ch['idx']}] {ch['name']}"
+            for ch in data['channels']
+        }
+        default_ch = data['channels'][0]['idx'] if data['channels'] else 0
+
+        with ui.card().classes('w-full'):
+            ui.label('📤 Reply').classes('font-bold text-gray-600')
+            with ui.row().classes('w-full items-center gap-2'):
+                msg_input = ui.input(value=prefilled).classes('flex-grow')
+                ch_select = ui.select(options=ch_options, value=default_ch).classes('w-32')
+
+                def send(inp=msg_input, sel=ch_select):
+                    text = inp.value
+                    if text:
+                        self._shared.put_command({
+                            'action': 'send_message',
+                            'channel': sel.value,
+                            'text': text,
+                        })
+                        inp.value = ''
+
+                ui.button('Send', on_click=send).classes('bg-blue-500 text-white')

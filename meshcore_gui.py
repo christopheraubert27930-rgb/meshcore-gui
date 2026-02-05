@@ -11,7 +11,7 @@ Usage:
     python meshcore_gui.py <BLE_ADDRESS> --debug-on
 
                    Author: PE1HVH
-                  Version: 4.0
+                  Version: 5.0
   SPDX-License-Identifier: MIT
                 Copyright: (c) 2026 PE1HVH
 """
@@ -20,7 +20,7 @@ import sys
 
 from nicegui import ui
 
-# Allow overriding DEBUG and CHANNELS_CONFIG before anything imports them
+# Allow overriding DEBUG before anything imports it
 import meshcore_gui.config as config
 
 try:
@@ -30,10 +30,10 @@ except ImportError:
     print("Install with: pip install meshcore")
     sys.exit(1)
 
-from meshcore_gui.ble_worker import BLEWorker
-from meshcore_gui.main_page import DashboardPage
-from meshcore_gui.route_page import RoutePage
-from meshcore_gui.shared_data import SharedData
+from meshcore_gui.ble.worker import BLEWorker
+from meshcore_gui.core.shared_data import SharedData
+from meshcore_gui.gui.dashboard import DashboardPage
+from meshcore_gui.gui.route_page import RoutePage
 
 
 # Global instances (needed by NiceGUI page decorators)

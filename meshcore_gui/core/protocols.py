@@ -9,9 +9,28 @@ and the Dependency Inversion Principle (DIP).
 Consumers depend on these protocols rather than on the concrete
 SharedData class, which makes the contracts explicit and enables
 testing with lightweight stubs.
+
+v4.1 changes
+~~~~~~~~~~~~~
+- Added ``CommandSink`` protocol for bot and command dispatch.
+- ``SharedDataWriter.add_message`` now accepts a ``Message`` dataclass.
+- ``SharedDataWriter.add_rx_log`` now accepts an ``RxLogEntry`` dataclass.
 """
 
 from typing import Dict, List, Optional, Protocol, runtime_checkable
+
+from meshcore_gui.core.models import Message, RxLogEntry
+
+
+# ----------------------------------------------------------------------
+# CommandSink — used by MeshBot and GUI pages
+# ----------------------------------------------------------------------
+
+@runtime_checkable
+class CommandSink(Protocol):
+    """Enqueue commands for the BLE worker."""
+
+    def put_command(self, cmd: Dict) -> None: ...
 
 
 # ----------------------------------------------------------------------
@@ -33,8 +52,8 @@ class SharedDataWriter(Protocol):
     def set_connected(self, connected: bool) -> None: ...
     def set_contacts(self, contacts_dict: Dict) -> None: ...
     def set_channels(self, channels: List[Dict]) -> None: ...
-    def add_message(self, msg: Dict) -> None: ...
-    def add_rx_log(self, entry: Dict) -> None: ...
+    def add_message(self, msg: Message) -> None: ...
+    def add_rx_log(self, entry: RxLogEntry) -> None: ...
     def get_next_command(self) -> Optional[Dict]: ...
     def get_contact_name_by_prefix(self, pubkey_prefix: str) -> str: ...
     def get_contact_by_name(self, name: str) -> Optional[tuple]: ...
@@ -43,7 +62,7 @@ class SharedDataWriter(Protocol):
 
 
 # ----------------------------------------------------------------------
-# Reader — used by DashboardPage and RoutePage
+# Reader — used by DashboardPage
 # ----------------------------------------------------------------------
 
 @runtime_checkable
@@ -70,9 +89,7 @@ class ContactLookup(Protocol):
     """Contact lookup interface used by RouteBuilder.
 
     RouteBuilder needs to resolve public key prefixes and names
-    to contact records.  Path hashes are always available in the
-    message dict (decoded from the raw packet), so no archive
-    lookup is needed.
+    to contact records.
     """
 
     def get_contact_by_prefix(self, pubkey_prefix: str) -> Optional[Dict]: ...
