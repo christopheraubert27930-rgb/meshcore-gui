@@ -9,7 +9,10 @@ from typing import Optional
 
 from nicegui import ui
 
+from meshcore_gui.core.models import Message
 from meshcore_gui.core.protocols import SharedDataReadAndLookup
+from meshcore_gui.gui.constants import TYPE_LABELS
+from meshcore_gui.services.route_builder import RouteBuilder
 
 
 class ArchivePage:
@@ -28,6 +31,7 @@ class ArchivePage:
         """
         self._shared = shared
         self._page_size = page_size
+        self._builder = RouteBuilder(shared)
         
         # Current page state (stored in app.storage.user)
         self._current_page = 0
@@ -225,7 +229,7 @@ class ArchivePage:
                     )
     
     def _render_message_card(self, msg_dict: dict, snapshot: dict):
-        """Render a single message card with reply option.
+        """Render a single message card with route table and reply option.
         
         Args:
             msg_dict: Message dictionary from archive.
@@ -240,7 +244,6 @@ class ArchivePage:
         snr = msg_dict.get('snr', 0.0)
         path_len = msg_dict.get('path_len', 0)
         path_hashes = msg_dict.get('path_hashes', [])
-        message_hash = msg_dict.get('message_hash', '')
         
         # Channel name - lookup from snapshot
         channel_name = f'Ch {channel}'  # Default
@@ -255,10 +258,10 @@ class ArchivePage:
         dir_color = 'text-blue-600' if direction == 'out' else 'text-green-600'
         
         # Card styling (same as messages_panel)
-        with ui.card().classes('w-full hover:bg-gray-50') as card:
+        with ui.card().classes('w-full hover:bg-gray-50'):
             with ui.column().classes('w-full gap-2'):
-                # Main message content (clickable for route)
-                with ui.row().classes('w-full items-start gap-2 cursor-pointer') as main_row:
+                # Main message content
+                with ui.row().classes('w-full items-start gap-2'):
                     # Time + direction
                     with ui.column().classes('flex-none w-20'):
                         ui.label(time).classes('text-xs text-gray-600')
@@ -274,12 +277,15 @@ class ArchivePage:
                             if path_len > 0:
                                 ui.label(f'↔ {path_len} hops').classes('text-xs text-gray-500')
                             
-                            if snr > 0:
+                            if snr and snr > 0:
                                 snr_color = 'text-green-600' if snr >= 5 else 'text-orange-600' if snr >= 0 else 'text-red-600'
                                 ui.label(f'SNR: {snr:.1f}').classes(f'text-xs {snr_color}')
                         
                         # Message text
                         ui.label(text).classes('text-sm whitespace-pre-wrap')
+                
+                # Route table (expandable)
+                self._render_archive_route(msg_dict, snapshot)
                 
                 # Reply panel (expandable)
                 with ui.expansion('💬 Reply', icon='reply').classes('w-full') as expansion:
@@ -290,13 +296,13 @@ class ArchivePage:
                         
                         # Channel selector
                         ch_options = {}
-                        default_ch = 0
+                        default_ch = None
                         
                         for ch in snapshot.get('channels', []):
                             ch_idx = ch.get('idx', ch.get('index', 0))
                             ch_name = ch.get('name', f'Ch {ch_idx}')
                             ch_options[ch_idx] = f"[{ch_idx}] {ch_name}"
-                            if default_ch == 0:  # Use first channel as default
+                            if default_ch is None:
                                 default_ch = ch_idx
                         
                         with ui.row().classes('w-full items-center gap-2'):
@@ -323,27 +329,82 @@ class ArchivePage:
                                     expansion.open = False  # Close expansion
                             
                             ui.button('Send', on_click=send_reply).props('color=primary')
-            
-            # Click handler for main row - open route visualization
-            def open_route():
-                # Find message in current snapshot to get its index
-                current_messages = snapshot.get('messages', [])
-                
-                # Try to find this message by hash in current messages
-                msg_index = -1
-                for idx, msg in enumerate(current_messages):
-                    if hasattr(msg, 'message_hash') and msg.message_hash == message_hash:
-                        msg_index = idx
-                        break
-                
-                if msg_index >= 0:
-                    # Message is in current buffer - use normal route page
-                    ui.run_javascript(f'window.open("/route/{msg_index}", "_blank")')
+
+    def _render_archive_route(self, msg_dict: dict, snapshot: dict):
+        """Render an inline route table for an archive message.
+
+        Args:
+            msg_dict: Message dictionary from archive.
+            snapshot: Current snapshot for contact lookup.
+        """
+        with ui.expansion('🗺️ Route', icon='route').classes('w-full') as expansion:
+            expansion.classes('bg-blue-50')
+            with ui.column().classes('w-full gap-1 p-2'):
+                msg = Message.from_dict(msg_dict)
+                route = self._builder.build(msg, snapshot)
+
+                path_nodes = route['path_nodes']
+                sender = route['sender']
+                self_node = route['self_node']
+
+                rows = []
+
+                # Sender row
+                if sender:
+                    rows.append({
+                        'hop': 'Start',
+                        'name': sender.name,
+                        'hash': sender.pubkey[:2].upper() if sender.pubkey else '-',
+                        'type': TYPE_LABELS.get(sender.type, '-'),
+                        'role': '📱 Sender',
+                    })
                 else:
-                    # Message is only in archive - show notification
-                    ui.notify('Route visualization only available for recent messages', type='warning')
-            
-            main_row.on('click', open_route)
+                    rows.append({
+                        'hop': 'Start',
+                        'name': msg.sender or 'Unknown',
+                        'hash': msg.sender_pubkey[:2].upper() if msg.sender_pubkey else '-',
+                        'type': '-',
+                        'role': '📱 Sender',
+                    })
+
+                # Repeaters
+                for i, node in enumerate(path_nodes):
+                    rows.append({
+                        'hop': str(i + 1),
+                        'name': node.name,
+                        'hash': node.pubkey[:2].upper() if node.pubkey else '-',
+                        'type': TYPE_LABELS.get(node.type, '-'),
+                        'role': '📡 Repeater',
+                    })
+
+                # Placeholder rows for unresolved hops
+                if not path_nodes and msg.path_len > 0:
+                    for i in range(msg.path_len):
+                        rows.append({
+                            'hop': str(i + 1),
+                            'name': '-', 'hash': '-', 'type': '-',
+                            'role': '📡 Repeater',
+                        })
+
+                # Receiver (self)
+                rows.append({
+                    'hop': 'End',
+                    'name': self_node.name,
+                    'hash': '-',
+                    'type': 'Companion',
+                    'role': '📱 Receiver' if msg.direction == 'in' else '📱 Sender',
+                })
+
+                ui.table(
+                    columns=[
+                        {'name': 'hop', 'label': 'Hop', 'field': 'hop', 'align': 'center'},
+                        {'name': 'role', 'label': 'Role', 'field': 'role'},
+                        {'name': 'name', 'label': 'Name', 'field': 'name'},
+                        {'name': 'hash', 'label': 'ID', 'field': 'hash', 'align': 'center'},
+                        {'name': 'type', 'label': 'Type', 'field': 'type'},
+                    ],
+                    rows=rows,
+                ).props('dense flat bordered').classes('w-full')
     
     @staticmethod
     def setup_route(shared: SharedDataReadAndLookup):

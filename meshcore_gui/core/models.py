@@ -51,6 +51,29 @@ class Message:
     path_hashes: List[str] = field(default_factory=list)
     message_hash: str = ""
 
+    @staticmethod
+    def from_dict(d: dict) -> "Message":
+        """Create a Message from an archive dictionary.
+
+        Args:
+            d: Dictionary as stored by MessageArchive.
+
+        Returns:
+            Message dataclass instance.
+        """
+        return Message(
+            time=d.get("time", ""),
+            sender=d.get("sender", ""),
+            text=d.get("text", ""),
+            channel=d.get("channel"),
+            direction=d.get("direction", "in"),
+            snr=d.get("snr"),
+            path_len=d.get("path_len", 0),
+            sender_pubkey=d.get("sender_pubkey", ""),
+            path_hashes=d.get("path_hashes", []),
+            message_hash=d.get("message_hash", ""),
+        )
+
 
 # ---------------------------------------------------------------------------
 # Contact

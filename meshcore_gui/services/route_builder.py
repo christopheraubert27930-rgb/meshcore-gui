@@ -81,7 +81,7 @@ class RouteBuilder:
             )
             if contact:
                 result['sender'] = RouteNode(
-                    name=contact.get('adv_name', pubkey[:8]),
+                    name=contact.get('adv_name') or pubkey[:8],
                     lat=contact.get('adv_lat', 0),
                     lon=contact.get('adv_lon', 0),
                     type=contact.get('type', 0),
@@ -96,7 +96,7 @@ class RouteBuilder:
                     pubkey, contact_data = match
                     contact = contact_data
                     result['sender'] = RouteNode(
-                        name=contact_data.get('adv_name', pubkey[:8]),
+                        name=contact_data.get('adv_name') or pubkey[:8],
                         lat=contact_data.get('adv_lat', 0),
                         lon=contact_data.get('adv_lon', 0),
                         type=contact_data.get('type', 0),
@@ -172,7 +172,7 @@ class RouteBuilder:
 
             if hop_contact:
                 nodes.append(RouteNode(
-                    name=hop_contact.get('adv_name', f'0x{hop_hash}'),
+                    name=hop_contact.get('adv_name') or f'0x{hop_hash}',
                     lat=hop_contact.get('adv_lat', 0),
                     lon=hop_contact.get('adv_lon', 0),
                     type=hop_contact.get('type', 0),
