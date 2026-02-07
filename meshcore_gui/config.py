@@ -40,7 +40,7 @@ CHANNELS_CONFIG: List[Dict] = [
     {'idx': 2, 'name': '#zwolle'},
     {'idx': 3, 'name': 'RahanSom'},
     {'idx': 4, 'name': '#bot'},
-    {'idx': 5, 'name': 'R-RSQ'},
+    {'idx': 5, 'name': 'H-RSQ'},
 ]
 
 
