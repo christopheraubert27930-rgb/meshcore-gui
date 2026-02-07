@@ -21,6 +21,7 @@ from typing import Dict, List, Optional, Tuple
 
 from meshcore_gui.config import debug_print
 from meshcore_gui.core.models import DeviceInfo, Message, RxLogEntry
+from meshcore_gui.services.message_archive import MessageArchive
 
 
 class SharedData:
@@ -30,7 +31,7 @@ class SharedData:
     Implements all four Protocol interfaces defined in ``protocols.py``.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, ble_address: Optional[str] = None) -> None:
         self.lock = threading.Lock()
 
         # Device info (typed)
@@ -60,6 +61,12 @@ class SharedData:
 
         # BOT enabled flag (toggled from GUI)
         self.bot_enabled: bool = False
+
+        # Message archive (persistent storage)
+        self.archive: Optional[MessageArchive] = None
+        if ble_address:
+            self.archive = MessageArchive(ble_address)
+            debug_print(f"MessageArchive initialized for {ble_address}")
 
     # ------------------------------------------------------------------
     # Device info updates
@@ -152,6 +159,10 @@ class SharedData:
             debug_print(
                 f"Message added: {msg.sender}: {msg.text[:30]}"
             )
+            
+            # Archive message for persistent storage
+            if self.archive:
+                self.archive.add_message(msg)
 
     def add_rx_log(self, entry: RxLogEntry) -> None:
         """Add an RxLogEntry (max 50, newest first)."""
@@ -160,6 +171,10 @@ class SharedData:
             if len(self.rx_log) > 50:
                 self.rx_log.pop()
             self.rxlog_updated = True
+            
+            # Archive entry for persistent storage
+            if self.archive:
+                self.archive.add_rx_log(entry)
 
     # ------------------------------------------------------------------
     # Snapshot and flags
@@ -200,6 +215,8 @@ class SharedData:
                 'rxlog_updated': self.rxlog_updated,
                 'gui_initialized': self.gui_initialized,
                 'bot_enabled': self.bot_enabled,
+                # Archive (for archive viewer)
+                'archive': self.archive,
             }
 
     def clear_update_flags(self) -> None:
@@ -258,4 +275,18 @@ class SharedData:
                     continue
                 if name.startswith(adv) or adv.startswith(name):
                     return (key, contact.copy())
+        return None
+
+    # ------------------------------------------------------------------
+    # Archive stats
+    # ------------------------------------------------------------------
+
+    def get_archive_stats(self) -> Optional[Dict]:
+        """Get statistics from the message archive.
+        
+        Returns:
+            Dict with archive stats, or None if archive not initialized.
+        """
+        if self.archive:
+            return self.archive.get_stats()
         return None

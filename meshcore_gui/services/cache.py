@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from meshcore_gui.config import debug_print
+from meshcore_gui.config import CONTACT_RETENTION_DAYS, debug_print
 
 CACHE_VERSION = 1
 CACHE_DIR = Path.home() / ".meshcore-gui" / "cache"
@@ -191,6 +191,49 @@ class DeviceCache:
             f"{len(fresh)} fresh, {len(cached)} total"
         )
         return cached
+
+    def prune_old_contacts(self) -> int:
+        """Remove contacts not seen for longer than CONTACT_RETENTION_DAYS.
+        
+        Returns:
+            Number of contacts removed.
+        """
+        cached = self._data.get("contacts", {})
+        if not cached:
+            return 0
+        
+        original_count = len(cached)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=CONTACT_RETENTION_DAYS)
+        
+        # Filter contacts based on last_seen timestamp
+        pruned = {}
+        for key, contact in cached.items():
+            last_seen_str = contact.get("last_seen")
+            
+            # Keep contact if no last_seen (shouldn't happen) or if recent
+            if not last_seen_str:
+                pruned[key] = contact
+                continue
+            
+            try:
+                last_seen = datetime.fromisoformat(last_seen_str)
+                if last_seen > cutoff:
+                    pruned[key] = contact
+            except (ValueError, TypeError):
+                # Keep contact if timestamp is invalid
+                pruned[key] = contact
+        
+        # Update and save if anything was removed
+        removed = original_count - len(pruned)
+        if removed > 0:
+            self._data["contacts"] = pruned
+            self.save()
+            debug_print(
+                f"Cache: pruned {removed} old contacts "
+                f"(retained: {len(pruned)})"
+            )
+        
+        return removed
 
     # ------------------------------------------------------------------
     # Metadata

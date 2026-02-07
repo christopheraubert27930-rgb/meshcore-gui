@@ -19,7 +19,11 @@ class MessagesPanel:
 
     def render(self) -> None:
         with ui.card().classes('w-full'):
-            ui.label('💬 Messages').classes('font-bold text-gray-600')
+            # Header with Archive button
+            with ui.row().classes('w-full items-center justify-between'):
+                ui.label('💬 Messages').classes('font-bold text-gray-600')
+                ui.button('📚 Archive', on_click=lambda: ui.run_javascript('window.open("/archive", "_blank")')).props('dense flat color=primary')
+            
             self._container = ui.column().classes(
                 'w-full h-40 overflow-y-auto gap-0 text-sm font-mono '
                 'bg-gray-50 p-2 rounded'

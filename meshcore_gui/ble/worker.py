@@ -51,6 +51,9 @@ from meshcore_gui.services.dedup import DualDeduplicator
 # Seconds between background retry attempts for missing channel keys.
 KEY_RETRY_INTERVAL: float = 30.0
 
+# Seconds between periodic cleanup of old archived data (24 hours).
+CLEANUP_INTERVAL: float = 86400.0
+
 
 class BLEWorker:
     """BLE communication worker that runs in a separate thread.
@@ -99,6 +102,7 @@ class BLEWorker:
         if self.mc:
             last_contact_refresh = time.time()
             last_key_retry = time.time()
+            last_cleanup = time.time()
 
             while self.running:
                 await self._cmd_handler.process_all()
@@ -114,6 +118,11 @@ class BLEWorker:
                 if self._pending_keys and now - last_key_retry > KEY_RETRY_INTERVAL:
                     await self._retry_missing_keys()
                     last_key_retry = now
+
+                # Periodic cleanup of old data (daily)
+                if now - last_cleanup > CLEANUP_INTERVAL:
+                    await self._cleanup_old_data()
+                    last_cleanup = now
 
                 await asyncio.sleep(0.1)
 
@@ -483,3 +492,30 @@ class BLEWorker:
                 )
         except Exception as exc:
             debug_print(f"Periodic contact refresh failed: {exc}")
+
+    # ------------------------------------------------------------------
+    # Periodic cleanup
+    # ------------------------------------------------------------------
+
+    async def _cleanup_old_data(self) -> None:
+        """Periodic cleanup of old archived data and contacts."""
+        try:
+            # Cleanup archived messages and rxlog
+            if self.shared.archive:
+                self.shared.archive.cleanup_old_data()
+                stats = self.shared.archive.get_stats()
+                debug_print(
+                    f"Cleanup: archive now has {stats['total_messages']} messages, "
+                    f"{stats['total_rxlog']} rxlog entries"
+                )
+            
+            # Prune old contacts from cache
+            removed = self._cache.prune_old_contacts()
+            if removed > 0:
+                # Reload contacts to SharedData after pruning
+                contacts = self._cache.get_contacts()
+                self.shared.set_contacts(contacts)
+                debug_print(f"Cleanup: pruned {removed} old contacts")
+            
+        except Exception as exc:
+            debug_print(f"Periodic cleanup failed: {exc}")

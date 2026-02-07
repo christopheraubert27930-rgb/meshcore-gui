@@ -137,6 +137,7 @@ class RxLogEntry:
         rssi:         Received signal strength (dBm).
         payload_type: Packet type identifier.
         hops:         Number of hops (path_len from frame header).
+        message_hash: Optional message hash for correlation with messages.
     """
 
     time: str
@@ -144,6 +145,7 @@ class RxLogEntry:
     rssi: float = 0.0
     payload_type: str = "?"
     hops: int = 0
+    message_hash: str = ""
 
 
 # ---------------------------------------------------------------------------

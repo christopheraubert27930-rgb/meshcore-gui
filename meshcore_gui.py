@@ -34,12 +34,14 @@ from meshcore_gui.ble.worker import BLEWorker
 from meshcore_gui.core.shared_data import SharedData
 from meshcore_gui.gui.dashboard import DashboardPage
 from meshcore_gui.gui.route_page import RoutePage
+from meshcore_gui.gui.archive_page import ArchivePage
 
 
 # Global instances (needed by NiceGUI page decorators)
 _shared = None
 _dashboard = None
 _route_page = None
+_archive_page = None
 
 
 @ui.page('/')
@@ -56,6 +58,13 @@ def _page_route(msg_index: int):
         _route_page.render(msg_index)
 
 
+@ui.page('/archive')
+def _page_archive():
+    """NiceGUI page handler — message archive."""
+    if _archive_page:
+        _archive_page.render()
+
+
 def main():
     """
     Main entry point.
@@ -63,7 +72,7 @@ def main():
     Parses CLI arguments, initialises all components and starts the
     NiceGUI server.
     """
-    global _shared, _dashboard, _route_page
+    global _shared, _dashboard, _route_page, _archive_page
 
     # Parse arguments
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
@@ -97,16 +106,17 @@ def main():
     print("=" * 50)
 
     # Assemble components
-    _shared = SharedData()
+    _shared = SharedData(ble_address)
     _dashboard = DashboardPage(_shared)
     _route_page = RoutePage(_shared)
+    _archive_page = ArchivePage(_shared)
 
     # Start BLE worker in background thread
     worker = BLEWorker(ble_address, _shared)
     worker.start()
 
     # Start NiceGUI server (blocks)
-    ui.run(title='MeshCore', port=8080, reload=False)
+    ui.run(title='MeshCore', port=8080, reload=False, storage_secret='meshcore-gui-secret')
 
 
 if __name__ == "__main__":

@@ -40,6 +40,7 @@ CHANNELS_CONFIG: List[Dict] = [
     {'idx': 2, 'name': '#zwolle'},
     {'idx': 3, 'name': 'RahanSom'},
     {'idx': 4, 'name': '#bot'},
+    {'idx': 5, 'name': 'R-RSQ'},
 ]
 
 
@@ -51,3 +52,20 @@ CHANNELS_CONFIG: List[Dict] = [
 # Contacts are merged (new/changed contacts update the cache; contacts
 # only present in cache are kept so offline nodes are preserved).
 CONTACT_REFRESH_SECONDS: float = 300.0  # 5 minutes
+
+
+# ==============================================================================
+# ARCHIVE / RETENTION
+# ==============================================================================
+
+# Retention period for archived messages (in days).
+# Messages older than this are automatically removed during cleanup.
+MESSAGE_RETENTION_DAYS: int = 30
+
+# Retention period for RX log entries (in days).
+# RX log entries older than this are automatically removed during cleanup.
+RXLOG_RETENTION_DAYS: int = 7
+
+# Retention period for contacts (in days).
+# Contacts not seen for longer than this are removed from cache.
+CONTACT_RETENTION_DAYS: int = 90

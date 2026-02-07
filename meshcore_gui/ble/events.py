@@ -47,63 +47,73 @@ class EventHandler:
         """Handle RX log data events."""
         payload = event.payload
 
-        self._shared.add_rx_log(RxLogEntry(
-            time=datetime.now().strftime('%H:%M:%S'),
-            snr=payload.get('snr', 0),
-            rssi=payload.get('rssi', 0),
-            payload_type=payload.get('payload_type', '?'),
-            hops=payload.get('path_len', 0),
-        ))
-
+        # Extract basic RX log info
+        time_str = datetime.now().strftime('%H:%M:%S')
+        snr = payload.get('snr', 0)
+        rssi = payload.get('rssi', 0)
+        payload_type = payload.get('payload_type', '?')
+        hops = payload.get('path_len', 0)
+        
+        # Try to decode payload to get message_hash
+        message_hash = ""
         payload_hex = payload.get('payload', '')
-        if not payload_hex:
-            return
+        if payload_hex:
+            decoded = self._decoder.decode(payload_hex)
+            if decoded is not None:
+                message_hash = decoded.message_hash
+                
+                # Process decoded message if it's a group text
+                if decoded.payload_type == PayloadType.GroupText and decoded.is_decrypted:
+                    self._dedup.mark_hash(decoded.message_hash)
+                    self._dedup.mark_content(
+                        decoded.sender, decoded.channel_idx, decoded.text,
+                    )
 
-        decoded = self._decoder.decode(payload_hex)
-        if decoded is None:
-            return
+                    sender_pubkey = ''
+                    if decoded.sender:
+                        match = self._shared.get_contact_by_name(decoded.sender)
+                        if match:
+                            sender_pubkey, _contact = match
 
-        if decoded.payload_type == PayloadType.GroupText and decoded.is_decrypted:
-            self._dedup.mark_hash(decoded.message_hash)
-            self._dedup.mark_content(
-                decoded.sender, decoded.channel_idx, decoded.text,
-            )
+                    snr_msg = self._extract_snr(payload)
 
-            sender_pubkey = ''
-            if decoded.sender:
-                match = self._shared.get_contact_by_name(decoded.sender)
-                if match:
-                    sender_pubkey, _contact = match
+                    self._shared.add_message(Message(
+                        time=time_str,
+                        sender=decoded.sender,
+                        text=decoded.text,
+                        channel=decoded.channel_idx,
+                        direction='in',
+                        snr=snr_msg,
+                        path_len=decoded.path_length,
+                        sender_pubkey=sender_pubkey,
+                        path_hashes=decoded.path_hashes,
+                        message_hash=decoded.message_hash,
+                    ))
 
-            snr = self._extract_snr(payload)
+                    debug_print(
+                        f"RX_LOG → message: hash={decoded.message_hash}, "
+                        f"sender={decoded.sender!r}, ch={decoded.channel_idx}, "
+                        f"path={decoded.path_hashes}"
+                    )
 
-            self._shared.add_message(Message(
-                time=datetime.now().strftime('%H:%M:%S'),
-                sender=decoded.sender,
-                text=decoded.text,
-                channel=decoded.channel_idx,
-                direction='in',
-                snr=snr,
-                path_len=decoded.path_length,
-                sender_pubkey=sender_pubkey,
-                path_hashes=decoded.path_hashes,
-                message_hash=decoded.message_hash,
-            ))
-
-            debug_print(
-                f"RX_LOG → message: hash={decoded.message_hash}, "
-                f"sender={decoded.sender!r}, ch={decoded.channel_idx}, "
-                f"path={decoded.path_hashes}"
-            )
-
-            self._bot.check_and_reply(
-                sender=decoded.sender,
-                text=decoded.text,
-                channel_idx=decoded.channel_idx,
-                snr=snr,
-                path_len=decoded.path_length,
-                path_hashes=decoded.path_hashes,
-            )
+                    self._bot.check_and_reply(
+                        sender=decoded.sender,
+                        text=decoded.text,
+                        channel_idx=decoded.channel_idx,
+                        snr=snr_msg,
+                        path_len=decoded.path_length,
+                        path_hashes=decoded.path_hashes,
+                    )
+        
+        # Add RX log entry with message_hash (if available)
+        self._shared.add_rx_log(RxLogEntry(
+            time=time_str,
+            snr=snr,
+            rssi=rssi,
+            payload_type=payload_type,
+            hops=hops,
+            message_hash=message_hash,
+        ))
 
     # ------------------------------------------------------------------
     # CHANNEL_MSG_RECV — fallback when RX_LOG decode missed it
