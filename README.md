@@ -26,6 +26,7 @@ Under the hood it uses `bleak` for Bluetooth Low Energy (which talks to BlueZ on
 - **Interactive Map** — Leaflet map with markers for own position and contacts
 - **Channel Messages** — Send and receive messages on channels
 - **Direct Messages** — Click on a contact to send a DM
+- **Contact Maintenance** — Pin/unpin contacts to protect them from deletion, bulk-delete unpinned contacts from the device, and toggle automatic contact addition from mesh adverts
 - **Message Filtering** — Filter messages per channel via checkboxes
 - **Message Route Visualization** — Click any message to open a detailed route page showing the path (hops) through the mesh network on an interactive map, with a hop summary, route table and reply panel
 - **Message Archive** — All messages and RX log entries are persisted to disk with configurable retention. Browse archived messages via the archive viewer with filters (channel, time range, text search), pagination and inline route tables
@@ -208,6 +209,9 @@ The GUI opens automatically in your browser at `http://localhost:8080`
 ### Contacts
 - List of known nodes with type and location
 - Click on a contact to send a DM
+- **Pin/Unpin**: Checkbox per contact to pin it — pinned contacts are sorted to the top and visually marked with a yellow background. Pin state is persisted locally and survives app restart.
+- **Bulk delete**: "🧹 Clean up" button removes all unpinned contacts from the device in one action, with a confirmation dialog showing how many will be removed vs. kept.
+- **Auto-add toggle**: "📥 Auto-add" checkbox controls whether the device automatically adds new contacts when it receives adverts from other mesh nodes. Disabled by default to prevent the contact list from filling up.
 
 ### Map
 - OpenStreetMap with markers for own position and contacts
@@ -336,17 +340,17 @@ The built-in bot automatically replies to messages containing recognised keyword
               │  safe)      │     │ (~/.meshcore- │
               └──────┬──────┘     │  gui/cache/)  │
                      │            └───────────────┘
-              ┌──────┴──────┐
-              │ Message     │
-              │ Archive     │
-              │ (~/.meshcore│
-              │ -gui/       │
+              ┌──────┴──────┐     ┌───────────────┐
+              │ Message     │     │ PinStore      │
+              │ Archive     │     │ Contact       │
+              │ (~/.meshcore│     │  Cleaner      │
+              │ -gui/       │     └───────────────┘
               │  archive/)  │
               └─────────────┘
 ```
 
 - **BLEWorker**: Runs in separate thread with its own asyncio loop, with background retry for missing channel keys
-- **CommandHandler**: Executes commands (send message, advert, refresh)
+- **CommandHandler**: Executes commands (send message, advert, refresh, purge unpinned, set auto-add)
 - **EventHandler**: Processes incoming BLE events (messages, RX log)
 - **PacketDecoder**: Decodes raw LoRa packets and extracts route data
 - **MeshBot**: Keyword-triggered auto-reply on configured channels
@@ -354,6 +358,8 @@ The built-in bot automatically replies to messages containing recognised keyword
 - **DeviceCache**: Local JSON cache per device for instant startup and offline resilience
 - **MessageArchive**: Persistent storage for messages and RX log with configurable retention and automatic cleanup
 <!-- ADDED: MessageArchive component description -->
+- **PinStore**: Persistent pin state storage per device (JSON-backed)
+- **ContactCleanerService**: Bulk-delete logic for unpinned contacts with statistics
 - **SharedData**: Thread-safe data sharing between BLE and GUI via Protocol interfaces
 - **DashboardPage**: Main GUI with modular panels (device, contacts, map, messages, etc.)
 - **RoutePage**: Standalone route visualization page opened per message
@@ -474,7 +480,7 @@ meshcore-gui/
 │   │   └── panels/                  # Modular UI panels
 │   │       ├── __init__.py
 │   │       ├── device_panel.py      # Device info display
-│   │       ├── contacts_panel.py    # Contacts list with DM support
+│   │       ├── contacts_panel.py    # Contacts list with DM, pin/unpin, bulk delete, auto-add toggle
 │   │       ├── map_panel.py         # Leaflet map
 │   │       ├── input_panel.py       # Message input and channel select
 │   │       ├── filter_panel.py      # Channel filters and bot toggle
@@ -485,8 +491,10 @@ meshcore-gui/
 │       ├── __init__.py
 │       ├── bot.py                   # Keyword-triggered auto-reply bot
 │       ├── cache.py                 # Local JSON cache per BLE device
+│       ├── contact_cleaner.py       # Bulk-delete logic for unpinned contacts
 │       ├── dedup.py                 # Message deduplication
 │       ├── message_archive.py       # Persistent message and RX log archive
+│       ├── pin_store.py             # Persistent pin state storage per device
 │       └── route_builder.py         # Route data construction
 ├── docs/
 │   ├── TROUBLESHOOTING.md           # BLE troubleshooting guide (Linux)

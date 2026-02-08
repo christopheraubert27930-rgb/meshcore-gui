@@ -21,6 +21,7 @@ from meshcore_gui.gui.panels import (
     MessagesPanel,
     RxLogPanel,
 )
+from meshcore_gui.services.pin_store import PinStore
 
 
 # Suppress the harmless "Client has been deleted" warning that NiceGUI
@@ -39,8 +40,9 @@ class DashboardPage:
         shared: SharedDataReader for data access and command dispatch.
     """
 
-    def __init__(self, shared: SharedDataReader) -> None:
+    def __init__(self, shared: SharedDataReader, pin_store: PinStore) -> None:
         self._shared = shared
+        self._pin_store = pin_store
 
         # Panels (created fresh on each render)
         self._device: DevicePanel | None = None
@@ -69,7 +71,7 @@ class DashboardPage:
         # Create panel instances
         put_cmd = self._shared.put_command
         self._device = DevicePanel()
-        self._contacts = ContactsPanel(put_cmd)
+        self._contacts = ContactsPanel(put_cmd, self._pin_store, self._shared.set_auto_add_enabled)
         self._map = MapPanel()
         self._input = InputPanel(put_cmd)
         self._filter = FilterPanel(self._shared.set_bot_enabled)
@@ -88,7 +90,7 @@ class DashboardPage:
         # Three-column layout
         with ui.row().classes('w-full h-full gap-2 p-2'):
             # Left column
-            with ui.column().classes('w-64 gap-2'):
+            with ui.column().classes('w-72 gap-2'):
                 self._device.render()
                 self._contacts.render()
 

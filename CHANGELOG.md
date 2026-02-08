@@ -10,7 +10,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) and [Semantic Ver
 
 <!-- ADDED: Nieuw v5.3.0 entry bovenaan -->
 
-## [5.3.0] - 2026-02-08 — Documentation Review & Route Table Fix
+## [5.4.0] - 2026-02-08 — Contact Maintenance Feature
+
+### Added
+- ✅ **Pin/Unpin contacts** (Iteratie A) — Toggle to pin individual contacts, protecting them from bulk deletion
+  - Persistent pin state stored in `~/.meshcore-gui/cache/<ADDRESS>_pins.json`
+  - Pinned contacts visually marked with yellow background
+  - Pinned contacts sorted to top of contact list
+  - Pin state survives app restart
+  - New service: `services/pin_store.py` — JSON-backed persistent pin storage
+
+- ✅ **Bulk delete unpinned contacts** (Iteratie B) — Remove all unpinned contacts from device in one action
+  - "🧹 Clean up" button in contacts panel with confirmation dialog
+  - Shows count of contacts to be removed vs. pinned contacts kept
+  - Progress status updates during removal
+  - Automatic device resync after completion
+  - New service: `services/contact_cleaner.py` — ContactCleanerService with purge statistics
+
+- ✅ **Auto-add contacts toggle** (Iteratie C) — Control whether device automatically adds new contacts from mesh adverts
+  - "📥 Auto-add" checkbox in contacts panel (next to Clean up button)
+  - Syncs with device via `set_manual_add_contacts()` SDK call
+  - Inverted logic handled internally (UI "Auto-add ON" = `set_manual_add_contacts(false)`)
+  - Optimistic update with automatic rollback on BLE failure
+  - State synchronized from device on each GUI update cycle
+
+### Changed
+- 🔄 `contacts_panel.py`: Added pin checkbox per contact, purge button, auto-add toggle, DM dialog (all existing functionality preserved)
+- 🔄 `commands.py`: Added `purge_unpinned` and `set_auto_add` command handlers
+- 🔄 `shared_data.py`: Added `auto_add_enabled` field with thread-safe getter/setter
+- 🔄 `protocols.py`: Added `set_auto_add_enabled` and `is_auto_add_enabled` to Writer and Reader protocols
+- 🔄 `dashboard.py`: Passes `PinStore` and `set_auto_add_enabled` callback to ContactsPanel
+- 🔄 **UI language**: All Dutch strings in `contacts_panel.py` and `commands.py` translated to English
+
+---
 
 ### Fixed
 - 🐛 **Route table names and IDs not displayed** — Route tables in both current messages (RoutePage) and archive messages (ArchivePage) now correctly show node names and public key IDs for sender, repeaters and receiver

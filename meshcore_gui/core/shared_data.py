@@ -62,6 +62,9 @@ class SharedData:
         # BOT enabled flag (toggled from GUI)
         self.bot_enabled: bool = False
 
+        # Auto-add contacts flag (synced with device)
+        self.auto_add_enabled: bool = False
+
         # Message archive (persistent storage)
         self.archive: Optional[MessageArchive] = None
         if ble_address:
@@ -120,6 +123,21 @@ class SharedData:
     def is_bot_enabled(self) -> bool:
         with self.lock:
             return self.bot_enabled
+
+    # ------------------------------------------------------------------
+    # Auto-add contacts
+    # ------------------------------------------------------------------
+
+    def set_auto_add_enabled(self, enabled: bool) -> None:
+        """Set auto-add contacts flag (thread-safe)."""
+        with self.lock:
+            self.auto_add_enabled = enabled
+            debug_print(f"Auto-add {'enabled' if enabled else 'disabled'}")
+
+    def is_auto_add_enabled(self) -> bool:
+        """Get auto-add contacts flag (thread-safe)."""
+        with self.lock:
+            return self.auto_add_enabled
 
     # ------------------------------------------------------------------
     # Command queue
@@ -215,6 +233,7 @@ class SharedData:
                 'rxlog_updated': self.rxlog_updated,
                 'gui_initialized': self.gui_initialized,
                 'bot_enabled': self.bot_enabled,
+                'auto_add_enabled': self.auto_add_enabled,
                 # Archive (for archive viewer)
                 'archive': self.archive,
             }
