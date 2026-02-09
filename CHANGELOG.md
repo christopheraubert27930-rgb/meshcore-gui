@@ -8,6 +8,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) and [Semantic Ver
 
 ---
 
+## [5.6.0] - 2026-02-09 — SDK Event Race Condition Fix
+
+### Fixed
+- 🛠 **BLE startup delay of ~2 minutes eliminated** — The meshcore Python SDK (`commands/base.py`) dispatched device response events before `wait_for_events()` registered its subscription. On busy networks with frequent `RX_LOG_DATA` events, this caused `send_device_query()` and `get_channel()` to fail repeatedly with `no_event_received`, wasting 110+ seconds in timeouts
+
+### Changed
+- 📄 `meshcore` SDK `commands/base.py`: Rewritten `send()` method to subscribe to expected events **before** transmitting the BLE command (subscribe-before-send pattern), matching the approach used by the companion apps (meshcore.js, iOS, Android). Submitted upstream as [meshcore_py PR #52](https://github.com/meshcore-dev/meshcore_py/pull/52)
+
+### Impact
+- Startup time reduced from ~2+ minutes to ~10 seconds on busy networks
+- All BLE commands (`send_device_query`, `get_channel`, `get_bat`, `send_appstart`, etc.) now succeed on first attempt instead of requiring multiple retries
+- No changes to meshcore_gui code required — the fix is entirely in the meshcore SDK
+
+### Temporary Installation
+Until the fix is merged upstream, install the patched meshcore SDK:
+```bash
+pip install --force-reinstall git+https://github.com/PE1HVH/meshcore_py.git@fix/event-race-condition
+```
+
+---
+
 <!-- ADDED: v5.5.2 bugfix entry -->
 
 ## [5.5.2] - 2026-02-09 — Bugfix: Bot Device Name Restoration After Restart

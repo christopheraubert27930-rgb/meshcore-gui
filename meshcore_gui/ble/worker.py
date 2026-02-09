@@ -35,9 +35,13 @@ from typing import Optional, Set
 from meshcore import MeshCore, EventType
 
 from meshcore_gui.config import (
+    BLE_DEFAULT_TIMEOUT,
+    BLE_LIB_DEBUG,
     CHANNELS_CONFIG,
     CONTACT_REFRESH_SECONDS,
+    debug_data,
     debug_print,
+    pp,
 )
 from meshcore_gui.core.protocols import SharedDataWriter
 from meshcore_gui.ble.commands import CommandHandler
@@ -142,10 +146,11 @@ class BLEWorker:
         self.shared.set_status(f"🔄 Connecting to {self.address}...")
         try:
             print(f"BLE: Connecting to {self.address}...")
-            self.mc = await MeshCore.create_ble(self.address)
+            self.mc = await MeshCore.create_ble(self.address, default_timeout=BLE_DEFAULT_TIMEOUT, debug=BLE_LIB_DEBUG)
             print("BLE: Connected!")
 
             await asyncio.sleep(1)
+            debug_print("Post-connection sleep done, wiring collaborators")
 
             # Wire collaborators now that mc is available
             self._evt_handler = EventHandler(
@@ -242,34 +247,76 @@ class BLEWorker:
         """Load device info, channels and contacts from device.
 
         Updates both SharedData (for GUI) and the disk cache.
-        Uses longer delays between retries because BLE command/response
-        over the meshcore library is unreliable with short intervals.
+
+        Key insight: ``MeshCore.connect()`` already sends ``send_appstart``
+        internally and stores the result in ``self.mc.self_info``.  We reuse
+        that instead of sending a duplicate command that is likely to fail
+        on a busy mesh network.  Only ``send_device_query`` needs a fresh
+        BLE round-trip.
         """
-        # send_appstart (retries with longer delays)
+        # ----------------------------------------------------------
+        # send_appstart — reuse result from MeshCore.connect()
+        # ----------------------------------------------------------
         self.shared.set_status("🔄 Device info...")
-        appstart_ok = False
-        for i in range(10):
-            debug_print(f"send_appstart attempt {i + 1}/10")
-            try:
-                r = await self.mc.commands.send_appstart()
-                if r.type != EventType.ERROR:
-                    print(f"BLE: send_appstart OK: {r.payload.get('name')} (attempt {i + 1})")
-                    self.shared.update_from_appstart(r.payload)
-                    self._cache.set_device(r.payload)
-                    appstart_ok = True
-                    break
-            except Exception as exc:
-                debug_print(f"send_appstart attempt {i + 1} exception: {exc}")
-            await asyncio.sleep(1.0)
 
-        if not appstart_ok:
-            print("BLE: ⚠️  send_appstart failed after 10 attempts")
+        cached_info = self.mc.self_info  # Filled by connect() → send_appstart()
+        if cached_info and cached_info.get("name"):
+            print(f"BLE: send_appstart OK (from connect): {cached_info.get('name')}")
+            self.shared.update_from_appstart(cached_info)
+            self._cache.set_device(cached_info)
+        else:
+            # Fallback: device info not populated by connect() — retry manually
+            debug_print(
+                "self_info empty after connect(), falling back to manual send_appstart"
+            )
+            appstart_ok = False
+            for i in range(3):
+                debug_print(f"send_appstart fallback attempt {i + 1}/3")
+                try:
+                    r = await self.mc.commands.send_appstart()
+                    if r is None:
+                        debug_print(
+                            f"send_appstart fallback {i + 1}: received None, retrying"
+                        )
+                        await asyncio.sleep(2.0)
+                        continue
+                    if r.type != EventType.ERROR:
+                        print(
+                            f"BLE: send_appstart OK: {r.payload.get('name')} "
+                            f"(fallback attempt {i + 1})"
+                        )
+                        self.shared.update_from_appstart(r.payload)
+                        self._cache.set_device(r.payload)
+                        appstart_ok = True
+                        break
+                    else:
+                        debug_print(
+                            f"send_appstart fallback {i + 1}: "
+                            f"ERROR — payload={pp(r.payload)}"
+                        )
+                except Exception as exc:
+                    debug_print(f"send_appstart fallback {i + 1} exception: {exc}")
+                await asyncio.sleep(2.0)
 
-        # send_device_query (retries)
-        for i in range(10):
-            debug_print(f"send_device_query attempt {i + 1}/10")
+            if not appstart_ok:
+                print("BLE: ⚠️  send_appstart failed after 3 fallback attempts")
+
+        # ----------------------------------------------------------
+        # send_device_query — no internal cache, must query device
+        # Fewer attempts (5) with longer delays (2s) to give the
+        # firmware time to process between mesh traffic bursts.
+        # ----------------------------------------------------------
+        for i in range(5):
+            debug_print(f"send_device_query attempt {i + 1}/5")
             try:
                 r = await self.mc.commands.send_device_query()
+                if r is None:
+                    debug_print(
+                        f"send_device_query attempt {i + 1}: "
+                        f"received None response, retrying"
+                    )
+                    await asyncio.sleep(2.0)
+                    continue
                 if r.type != EventType.ERROR:
                     fw = r.payload.get("ver", "")
                     print(f"BLE: send_device_query OK: {fw} (attempt {i + 1})")
@@ -277,21 +324,39 @@ class BLEWorker:
                     if fw:
                         self._cache.set_firmware_version(fw)
                     break
+                else:
+                    debug_print(
+                        f"send_device_query attempt {i + 1}: "
+                        f"ERROR response — payload={pp(r.payload)}"
+                    )
             except Exception as exc:
                 debug_print(f"send_device_query attempt {i + 1} exception: {exc}")
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(2.0)
 
+        # ----------------------------------------------------------
         # Channels (hardcoded — BLE get_channel is unreliable)
+        # ----------------------------------------------------------
         self.shared.set_status("🔄 Channels...")
         self.shared.set_channels(CHANNELS_CONFIG)
         self._cache.set_channels(CHANNELS_CONFIG)
         print(f"BLE: Channels loaded: {[c['name'] for c in CHANNELS_CONFIG]}")
 
+        # ----------------------------------------------------------
         # Contacts (merge with cache)
+        # ----------------------------------------------------------
         self.shared.set_status("🔄 Contacts...")
+        debug_print("get_contacts starting")
         try:
             r = await self.mc.commands.get_contacts()
-            if r.type != EventType.ERROR:
+            debug_print(f"get_contacts result: type={r.type if r else None}")
+            if r and r.payload:
+                debug_data("get_contacts payload", r.payload)
+            if r is None:
+                debug_print(
+                    "BLE: get_contacts returned None, "
+                    "keeping cached contacts"
+                )
+            elif r.type != EventType.ERROR:
                 merged = self._cache.merge_contacts(r.payload)
                 self.shared.set_contacts(merged)
                 print(
@@ -299,7 +364,10 @@ class BLEWorker:
                     f"{len(merged)} total (with cache)"
                 )
             else:
-                debug_print("BLE: get_contacts failed, keeping cached contacts")
+                debug_print(
+                    "BLE: get_contacts failed — "
+                    f"payload={pp(r.payload)}, keeping cached contacts"
+                )
         except Exception as exc:
             debug_print(f"BLE: get_contacts exception: {exc}")
 
@@ -375,10 +443,18 @@ class BLEWorker:
             try:
                 r = await self.mc.commands.get_channel(idx)
 
+                if r is None:
+                    debug_print(
+                        f"get_channel({idx}) attempt {attempt + 1}/{max_attempts}: "
+                        f"received None response, retrying"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+
                 if r.type == EventType.ERROR:
                     debug_print(
                         f"get_channel({idx}) attempt {attempt + 1}/{max_attempts}: "
-                        f"ERROR response"
+                        f"ERROR response — payload={pp(r.payload)}"
                     )
                     await asyncio.sleep(delay)
                     continue
@@ -489,6 +565,9 @@ class BLEWorker:
         """Periodic background contact refresh — merge new/changed."""
         try:
             r = await self.mc.commands.get_contacts()
+            if r is None:
+                debug_print("Periodic refresh: get_contacts returned None, skipping")
+                return
             if r.type != EventType.ERROR:
                 merged = self._cache.merge_contacts(r.payload)
                 self.shared.set_contacts(merged)

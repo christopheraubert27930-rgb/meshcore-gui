@@ -274,12 +274,14 @@ Device info, contacts and channel keys are automatically cached to disk in `~/.m
 
 **Channel key loading:**
 
-BLE commands to the MeshCore device are fundamentally unreliable — `get_channel()`, `send_appstart()` and `send_device_query()` can all fail even after multiple retries. The channel key loading strategy handles this gracefully:
+Channel key loading uses a cache-first strategy with BLE fallback:
 
 1. Cached keys are loaded first and never overwritten by name-derived fallbacks
-2. Each channel gets 2 quick attempts at startup (non-blocking)
+2. Each channel is queried from the device at startup
 3. Channels that fail are retried in the background every 30 seconds
 4. Successfully loaded keys are immediately written to the cache for next startup
+
+> **Note:** Prior to v5.6.0, BLE commands frequently timed out due to a race condition in the meshcore SDK. The patched SDK resolves this — see [Known Limitations](#known-limitations) for installation instructions.
 
 **Contact merge strategy:**
 - New contacts from the device are added to the cache with a `last_seen` timestamp
@@ -381,8 +383,8 @@ The built-in bot automatically replies to messages containing recognised keyword
 
 ## Known Limitations
 
-1. **Channels hardcoded** — The `get_channel()` function in meshcore-py is unreliable via BLE (mitigated by background retry and disk caching of channel keys)
-2. **BLE command unreliability** — `send_appstart()`, `send_device_query()` and `get_channel()` can all fail intermittently. The application uses aggressive retries (10 attempts for device info, background retry every 30s for channel keys) and disk caching to compensate
+1. **Channels hardcoded** — Channel configuration is defined in `config.py` rather than auto-discovered from the device
+2. **BLE command reliability** — Resolved in v5.6.0. The meshcore SDK previously had a race condition where device responses were missed. The patched SDK ([PR #52](https://github.com/meshcore-dev/meshcore_py/pull/52)) uses subscribe-before-send to eliminate this. Until merged upstream, install the patched version: `pip install --force-reinstall git+https://github.com/PE1HVH/meshcore_py.git@fix/event-race-condition`
 3. **Initial load time** — GUI waits for BLE data before the first render is complete (mitigated by cache: if cached data exists, the GUI populates instantly)
 4. **Archive route visualization** — Route data for archived messages depends on contacts currently in memory; archived-only messages without recent contact data may show incomplete routes
 <!-- ADDED: Archive-related limitation -->
