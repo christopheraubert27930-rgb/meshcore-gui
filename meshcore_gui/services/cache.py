@@ -21,7 +21,7 @@ Merge strategy (contacts)
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -191,6 +191,35 @@ class DeviceCache:
             f"{len(fresh)} fresh, {len(cached)} total"
         )
         return cached
+
+    def remove_contacts(self, pubkeys: List[str]) -> int:
+        """Remove specific contacts from the local cache by public key.
+
+        Args:
+            pubkeys: List of public key hex strings to remove.
+
+        Returns:
+            Number of contacts actually removed from the cache.
+        """
+        cached = self._data.get("contacts", {})
+        if not cached:
+            return 0
+
+        removed = 0
+        for key in pubkeys:
+            if key in cached:
+                del cached[key]
+                removed += 1
+
+        if removed > 0:
+            self._data["contacts"] = cached
+            self.save()
+            debug_print(
+                f"Cache: removed {removed} contacts from local history "
+                f"(remaining: {len(cached)})"
+            )
+
+        return removed
 
     def prune_old_contacts(self) -> int:
         """Remove contacts not seen for longer than CONTACT_RETENTION_DAYS.

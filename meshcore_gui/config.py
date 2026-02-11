@@ -1,7 +1,7 @@
 """
 Application configuration for MeshCore GUI.
 
-Contains only global runtime settings and the channel table.
+Contains only global runtime settings.
 Bot configuration lives in :mod:`meshcore_gui.services.bot`.
 UI display constants live in :mod:`meshcore_gui.gui.constants`.
 
@@ -210,19 +210,18 @@ def debug_data(label: str, obj: Any) -> None:
 # CHANNELS
 # ==============================================================================
 
-# Hardcoded channels configuration.
-# Determine your channels with meshcli:
-#   meshcli -d <BLE_ADDRESS>
-#   > get_channels
-# Output: 0: Public [...], 1: #test [...], etc.
-CHANNELS_CONFIG: List[Dict] = [
-    {'idx': 0, 'name': 'Public'},
-    {'idx': 1, 'name': '#test'},
-    {'idx': 2, 'name': '#zwolle'},
-    {'idx': 3, 'name': 'RahanSom'},
-    {'idx': 4, 'name': '#bot'},
-    {'idx': 5, 'name': 'H-RSQ'},
-]
+# Maximum number of channel slots to probe on the device.
+# MeshCore supports up to 8 channels (indices 0-7).
+MAX_CHANNELS: int = 8
+
+# Enable or disable caching of the channel list to disk.
+# When False (default), channels are always fetched fresh from the
+# device at startup, guaranteeing the GUI always reflects the actual
+# device configuration.  When True, channels are loaded from cache
+# for instant GUI population and then refreshed from the device.
+# Note: channel *keys* (for packet decryption) are always cached
+# regardless of this setting.
+CHANNEL_CACHE_ENABLED: bool = False
 
 
 # ==============================================================================

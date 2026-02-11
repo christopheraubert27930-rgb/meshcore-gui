@@ -68,6 +68,14 @@ class SharedData:
         # Original device name (saved when BOT is enabled, restored when disabled)
         self.original_device_name: Optional[str] = None
 
+        # Room Server login states: pubkey → {'state': 'ok'|'fail'|'pending'|'logged_out', 'detail': str}
+        self.room_login_states: Dict[str, Dict] = {}
+
+        # Room message cache: pubkey_prefix (12 hex) → List[Message]
+        # Populated from archive on first access per room, then kept in
+        # sync by add_message().
+        self._room_msg_cache: Dict[str, List[Message]] = {}
+
         # Message archive (persistent storage)
         self.archive: Optional[MessageArchive] = None
         if ble_address:
@@ -163,6 +171,93 @@ class SharedData:
             return self.device.name
 
     # ------------------------------------------------------------------
+    # Room Server login state
+    # ------------------------------------------------------------------
+
+    def set_room_login_state(
+        self, pubkey_prefix: str, state: str, detail: str = "",
+    ) -> None:
+        """Update login state for a Room Server (thread-safe).
+
+        Cleans up any stale entries whose first 12 hex chars match the
+        new key.  This prevents duplicate keys (e.g. a 12-char prefix
+        from the worker *and* a 64-char full pubkey from the command
+        handler) from coexisting and causing the UI to see stale state.
+
+        Args:
+            pubkey_prefix: Room server pubkey (full or prefix hex string).
+            state:         One of 'pending', 'ok', 'fail', 'logged_out'.
+            detail:        Human-readable detail string.
+        """
+        with self.lock:
+            # Remove overlapping entries (different key length, same room)
+            norm = pubkey_prefix[:12]
+            stale = [
+                k for k in self.room_login_states
+                if k != pubkey_prefix and k[:12] == norm
+            ]
+            for k in stale:
+                debug_print(
+                    f"Room login state: removing stale key {k[:12]}…"
+                )
+                del self.room_login_states[k]
+
+            self.room_login_states[pubkey_prefix] = {
+                'state': state,
+                'detail': detail,
+            }
+            debug_print(
+                f"Room login state: {pubkey_prefix[:12]}… → {state}"
+                f"{(' (' + detail + ')') if detail else ''}"
+            )
+
+    def get_room_login_states(self) -> Dict[str, Dict]:
+        """Return a copy of all room login states (thread-safe)."""
+        with self.lock:
+            return {k: v.copy() for k, v in self.room_login_states.items()}
+
+    # ------------------------------------------------------------------
+    # Room message cache (archive → UI)
+    # ------------------------------------------------------------------
+
+    def load_room_history(self, pubkey: str, limit: int = 50) -> None:
+        """Load archived room messages into the in-memory cache.
+
+        Called by the BLE command handler at room login and when a room
+        card is first created.  Safe to call multiple times — subsequent
+        calls refresh the cache from the archive.
+
+        Args:
+            pubkey: Room server public key (full or prefix, ≥ 12 hex chars).
+            limit:  Maximum number of archived messages to load.
+        """
+        if not self.archive:
+            return
+
+        norm = pubkey[:12]
+        archived = self.archive.get_messages_by_sender_pubkey(norm, limit)
+
+        with self.lock:
+            messages = [Message.from_dict(d) for d in archived]
+            self._room_msg_cache[norm] = messages
+            debug_print(
+                f"Room history loaded: {norm}… → {len(messages)} messages"
+            )
+
+    def get_room_messages(self, pubkey: str) -> List[Message]:
+        """Return cached room messages for a given room pubkey (thread-safe).
+
+        Args:
+            pubkey: Room server public key (full or prefix, ≥ 12 hex chars).
+
+        Returns:
+            List of Message objects (oldest first), or empty list.
+        """
+        norm = pubkey[:12]
+        with self.lock:
+            return list(self._room_msg_cache.get(norm, []))
+
+    # ------------------------------------------------------------------
     # Command queue
     # ------------------------------------------------------------------
 
@@ -192,7 +287,11 @@ class SharedData:
             debug_print(f"Channels updated: {[c['name'] for c in channels]}")
 
     def add_message(self, msg: Message) -> None:
-        """Add a Message to the store (max 100)."""
+        """Add a Message to the store (max 100).
+
+        Also appends to the room-message cache if the sender matches
+        a known room, keeping archive and cache in sync.
+        """
         with self.lock:
             self.messages.append(msg)
             if len(self.messages) > 100:
@@ -200,6 +299,12 @@ class SharedData:
             debug_print(
                 f"Message added: {msg.sender}: {msg.text[:30]}"
             )
+
+            # Keep room message cache in sync
+            if msg.sender_pubkey:
+                norm = msg.sender_pubkey[:12]
+                if norm in self._room_msg_cache:
+                    self._room_msg_cache[norm].append(msg)
             
             # Archive message for persistent storage
             if self.archive:
@@ -259,6 +364,16 @@ class SharedData:
                 'auto_add_enabled': self.auto_add_enabled,
                 # Archive (for archive viewer)
                 'archive': self.archive,
+                # Room login states
+                'room_login_states': {
+                    k: v.copy()
+                    for k, v in self.room_login_states.items()
+                },
+                # Room message cache (archived + live)
+                'room_messages': {
+                    k: list(v)
+                    for k, v in self._room_msg_cache.items()
+                },
             }
 
     def clear_update_flags(self) -> None:

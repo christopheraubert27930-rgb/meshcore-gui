@@ -186,12 +186,46 @@ class EventHandler:
     # ------------------------------------------------------------------
 
     def on_contact_msg(self, event) -> None:
-        """Handle direct message events."""
+        """Handle direct message and room message events.
+
+        Room Server messages arrive as ``CONTACT_MSG_RECV`` with
+        ``txt_type == 2``.  The ``pubkey_prefix`` is the Room Server's
+        key and the ``signature`` field contains the original author's
+        pubkey prefix.  We resolve the author name from ``signature``
+        so the UI shows who actually wrote the message.
+        """
         payload = event.payload
         pubkey = payload.get('pubkey_prefix', '')
+        txt_type = payload.get('txt_type', 0)
+        signature = payload.get('signature', '')
 
         debug_print(f"DM payload keys: {list(payload.keys())}")
 
+        # --- Room Server message (txt_type 2) ---
+        if txt_type == 2 and signature:
+            # Resolve actual author from signature (author pubkey prefix)
+            author = self._shared.get_contact_name_by_prefix(signature)
+            if not author:
+                author = signature[:8] if signature else '?'
+
+            self._shared.add_message(Message(
+                time=datetime.now().strftime('%H:%M:%S'),
+                sender=author,
+                text=payload.get('text', ''),
+                channel=None,
+                direction='in',
+                snr=self._extract_snr(payload),
+                path_len=payload.get('path_len', 0),
+                sender_pubkey=pubkey,  # room pubkey → for panel filtering
+            ))
+            debug_print(
+                f"Room msg from {author} (sig={signature}) "
+                f"via room {pubkey[:12]}: "
+                f"{payload.get('text', '')[:30]}"
+            )
+            return
+
+        # --- Regular DM ---
         sender = ''
         if pubkey:
             sender = self._shared.get_contact_name_by_prefix(pubkey)

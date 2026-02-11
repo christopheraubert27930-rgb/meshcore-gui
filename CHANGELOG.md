@@ -8,6 +8,56 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) and [Semantic Ver
 
 ---
 
+<!-- ADDED: v5.7.0 feature + bugfix entry -->
+
+## [5.7.0] - 2026-02-11 — Room Server Support, Dynamic Channel Discovery & Contact Management
+
+### Added
+- ✅ **Room Server panel** — Dedicated per-room-server message panel in the centre column below Messages. Each Room Server (type=3 contact) gets its own `ui.card()` with login/logout controls and message display
+  - Click a Room Server contact to open an add/login dialog with password field
+  - After login: messages are displayed in the room card; send messages directly from the room panel
+  - Password-rij + login-knop automatically replaced by Logout button after successful login
+  - Room Server author attribution via `signature` field (txt_type=2) — real message author is resolved from the 4-byte pubkey prefix, not the room server pubkey
+  - New panel: `gui/panels/room_server_panel.py` — per-room card management with login state tracking
+- ✅ **Room Server password store** — Passwords stored outside the repository in `~/.meshcore-gui/room_passwords/<ADDRESS>.json`
+  - New service: `services/room_password_store.py` — JSON-backed persistent password storage per BLE device, analogous to `PinStore`
+  - Room panels are restored from stored passwords on app restart
+- ✅ **Dynamic channel discovery** — Channels are now auto-discovered from the device at startup via `get_channel()` BLE probing, replacing the hardcoded `CHANNELS_CONFIG`
+  - Single-attempt probe per channel slot with early stop after 2 consecutive empty slots
+  - Channel name and encryption key extracted in a single pass (combined discovery + key loading)
+  - Configurable channel caching via `CHANNEL_CACHE_ENABLED` (default: `False` — always fresh from device)
+  - `MAX_CHANNELS` setting (default: 8) controls how many slots are probed
+- ✅ **Individual contact deletion** — 🗑️ delete button per unpinned contact in the contacts list, with confirmation dialog
+  - New command: `remove_single_contact` in BLE command handler
+  - Pinned contacts are protected (no delete button shown)
+- ✅ **"Also delete from history" option** — Checkbox in the Clean up confirmation dialog to also remove locally cached contact data
+
+<!-- ADDED: Research document reference -->
+- ✅ **Room Server protocol research** — `RoomServer_Companion_App_Onderzoek.md` documents the full companion app message flow (login, push protocol, signature mechanism, auto_message_fetching)
+
+### Changed
+- 🔄 `config.py`: Removed `CHANNELS_CONFIG` constant; added `MAX_CHANNELS` (default: 8) and `CHANNEL_CACHE_ENABLED` (default: `False`)
+- 🔄 `ble/worker.py`: Replaced hardcoded channel loading with `_discover_channels()` method; added `_try_get_channel_info()` helper; `_apply_cache()` respects `CHANNEL_CACHE_ENABLED` setting; removed `_load_channel_keys()` (integrated into discovery pass)
+- 🔄 `ble/commands.py`: Added `login_room`, `send_room_msg` and `remove_single_contact` command handlers
+- 🔄 `gui/panels/contacts_panel.py`: Contact click now dispatches by type — type=3 (Room Server) opens room dialog, others open DM dialog; added `on_add_room` callback parameter; added 🗑️ delete button per unpinned contact
+- 🔄 `gui/panels/messages_panel.py`: Room Server messages filtered from general message view via `_is_room_message()` with prefix matching; `update()` accepts `room_pubkeys` parameter
+- 🔄 `gui/dashboard.py`: Added `RoomServerPanel` in centre column; `_update_ui()` passes `room_pubkeys` to Messages panel; added `_on_add_room_server` callback
+- 🔄 `gui/panels/filter_panel.py`: Channel filter checkboxes now built dynamically from discovered channels (no hardcoded references)
+- 🔄 `services/bot.py`: Removed stale comment referencing hardcoded channels
+
+### Fixed
+- 🛠 **Room Server messages appeared as DM** — Messages from Room Servers (txt_type=2) were displayed in the general Messages panel as direct messages. They are now filtered out and shown exclusively in the Room Server panel
+- 🛠 **Historical room messages not shown after login** — Post-login fetch loop was polling `get_msg()` before room server had time to push messages over LoRa RF (10–75s per message). Removed redundant fetch loop; the library's `auto_message_fetching` handles `MESSAGES_WAITING` events correctly and event-driven
+- 🛠 **Author attribution incorrect for room messages** — Room server messages showed the room server name as sender instead of the actual message author. Now correctly resolved from the `signature` field (4-byte pubkey prefix) via contact lookup
+
+### Impact
+- Room Servers are now first-class citizens in the GUI with dedicated panels
+- Channel configuration no longer requires manual editing of `config.py`
+- Contact list management is more granular with per-contact deletion
+- No breaking changes to existing functionality (messages, DM, map, archive, bot, etc.)
+
+---
+
 ## [5.6.0] - 2026-02-09 — SDK Event Race Condition Fix
 
 ### Fixed

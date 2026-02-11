@@ -447,6 +447,54 @@ class MessageArchive:
                 "pending_rxlog": len(self._rxlog_buffer),
             }
 
+    def get_messages_by_sender_pubkey(
+        self, pubkey_prefix: str, limit: int = 50,
+    ) -> List[Dict]:
+        """Return archived messages whose *sender_pubkey* starts with *pubkey_prefix*.
+
+        Useful for loading Room Server history: room messages are stored
+        with ``sender_pubkey`` equal to the room's public-key prefix.
+
+        Args:
+            pubkey_prefix: First N hex chars of the sender pubkey to match.
+            limit:         Maximum number of messages to return (newest).
+
+        Returns:
+            List of message dicts (oldest-first), at most *limit* entries.
+        """
+        with self._lock:
+            # Flush pending writes so we don't miss recent messages
+            self._flush_messages()
+
+            if not self._messages_path.exists():
+                return []
+
+            try:
+                data = json.loads(
+                    self._messages_path.read_text(encoding="utf-8")
+                )
+                if data.get("version") != ARCHIVE_VERSION:
+                    return []
+
+                messages = data.get("messages", [])
+                norm = pubkey_prefix[:12]
+
+                matched = [
+                    msg for msg in messages
+                    if (msg.get("sender_pubkey") or "").startswith(norm)
+                ]
+
+                # Oldest-first, keep last *limit*
+                matched.sort(key=lambda m: m.get("timestamp_utc", ""))
+                return matched[-limit:]
+
+            except (json.JSONDecodeError, OSError) as exc:
+                debug_print(
+                    f"Archive: error querying by pubkey {pubkey_prefix[:12]}: "
+                    f"{exc}"
+                )
+                return []
+
     def query_messages(
         self,
         after: Optional[datetime] = None,
