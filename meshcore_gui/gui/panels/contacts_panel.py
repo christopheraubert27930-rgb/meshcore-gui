@@ -22,10 +22,12 @@ class ContactsPanel:
         put_command: Callable[[Dict], None],
         pin_store: PinStore,
         set_auto_add_enabled: Callable[[bool], None],
+        on_add_room: Optional[Callable[[str, str, str], None]] = None,
     ) -> None:
         self._put_command = put_command
         self._pin_store = pin_store
         self._set_auto_add_enabled = set_auto_add_enabled
+        self._on_add_room = on_add_room
         self._cleaner = ContactCleanerService(pin_store)
         self._container = None
         self._auto_add_checkbox = None
@@ -114,7 +116,7 @@ class ContactsPanel:
                         'cursor-pointer hover:bg-gray-100 rounded py-0 px-1'
                     ).on(
                         'click',
-                        lambda e, k=key, n=name: self._open_dm_dialog(k, n),
+                        lambda e, k=key, n=name, t=ctype: self._on_contact_click(k, n, t),
                     ):
                         ui.label(icon).classes('text-sm')
                         ui.label(name[:15]).classes(
@@ -165,54 +167,122 @@ class ContactsPanel:
 
     def _open_purge_dialog(self) -> None:
         """Open confirmation dialog for bulk-deleting unpinned contacts."""
-        if not self._last_data:
-            ui.notify('No contacts loaded', type='warning')
-            return
+        try:
+            if not self._last_data:
+                ui.notify('No contacts loaded', type='warning')
+                print("CleanUp: _last_data is None")
+                return
 
-        contacts = self._last_data.get('contacts', {})
-        if not contacts:
-            ui.notify('No contacts found', type='warning')
-            return
+            contacts = self._last_data.get('contacts', {})
+            if not contacts:
+                ui.notify('No contacts found', type='warning')
+                print("CleanUp: contacts dict is empty")
+                return
 
-        stats = self._cleaner.get_purge_stats(contacts)
-
-        if stats.unpinned_count == 0:
-            ui.notify(
-                'All contacts are pinned — nothing to remove',
-                type='info',
+            print(f"CleanUp: {len(contacts)} contacts found, calculating stats...")
+            stats = self._cleaner.get_purge_stats(contacts)
+            print(
+                f"CleanUp: unpinned={stats.unpinned_count}, "
+                f"pinned={stats.pinned_count}"
             )
-            return
 
-        with ui.dialog() as dialog, ui.card().classes('w-96'):
-            ui.label('🧹 Clean up contacts').classes(
-                'font-bold text-lg'
-            )
-            ui.label(
-                f'{stats.unpinned_count} contacts will be removed from device.\n'
-                f'{stats.pinned_count} pinned contacts will be kept.'
-            ).classes('whitespace-pre-line my-2')
-
-            with ui.row().classes('w-full justify-end gap-2 mt-4'):
-                ui.button('Cancel', on_click=dialog.close).props(
-                    'flat'
+            if stats.unpinned_count == 0:
+                ui.notify(
+                    'All contacts are pinned — nothing to remove',
+                    type='info',
                 )
+                return
 
-                def confirm_purge():
-                    self._put_command({
-                        'action': 'purge_unpinned',
-                        'pubkeys': stats.unpinned_keys,
-                    })
-                    dialog.close()
-                    ui.notify(
-                        f'Removing {stats.unpinned_count} '
-                        f'contacts...',
-                        type='info',
+            with ui.dialog() as dialog, ui.card().classes('w-96'):
+                ui.label('🧹 Clean up contacts').classes(
+                    'font-bold text-lg'
+                )
+                ui.label(
+                    f'{stats.unpinned_count} contacts will be removed from device.\n'
+                    f'{stats.pinned_count} pinned contacts will be kept.'
+                ).classes('whitespace-pre-line my-2')
+
+                delete_history_cb = ui.checkbox(
+                    'Also delete from local history',
+                ).props('dense')
+
+                with ui.row().classes('w-full justify-end gap-2 mt-4'):
+                    ui.button('Cancel', on_click=dialog.close).props(
+                        'flat'
                     )
 
+                    def confirm_purge():
+                        self._put_command({
+                            'action': 'purge_unpinned',
+                            'pubkeys': stats.unpinned_keys,
+                            'delete_from_history': delete_history_cb.value,
+                        })
+                        dialog.close()
+                        ui.notify(
+                            f'Removing {stats.unpinned_count} '
+                            f'contacts...',
+                            type='info',
+                        )
+
+                    ui.button(
+                        'Remove',
+                        on_click=confirm_purge,
+                    ).classes('bg-red-500 text-white')
+
+            dialog.open()
+            print("CleanUp: dialog opened successfully")
+
+        except Exception as exc:
+            print(f"CleanUp: EXCEPTION — {exc}")
+            ui.notify(
+                f'Error opening cleanup dialog: {exc}',
+                type='negative',
+            )
+
+    # ------------------------------------------------------------------
+    # Contact click dispatcher
+    # ------------------------------------------------------------------
+
+    def _on_contact_click(self, pubkey: str, name: str, ctype: int) -> None:
+        """Route contact click to the appropriate dialog.
+
+        Type 3 (Room Server) opens a Room Server add/login dialog.
+        All other types open the standard DM dialog.
+        """
+        if ctype == 3 and self._on_add_room:
+            self._open_room_dialog(pubkey, name)
+        else:
+            self._open_dm_dialog(pubkey, name)
+
+    # ------------------------------------------------------------------
+    # Room Server dialog
+    # ------------------------------------------------------------------
+
+    def _open_room_dialog(self, pubkey: str, contact_name: str) -> None:
+        """Open dialog to add a Room Server panel with password."""
+        with ui.dialog() as dialog, ui.card().classes('w-96'):
+            ui.label(f'🏠 Add Room Server: {contact_name}').classes(
+                'font-bold text-lg'
+            )
+            pw_input = ui.input(
+                placeholder='Room password...',
+                password=True,
+                password_toggle_button=True,
+            ).classes('w-full')
+
+            with ui.row().classes('w-full justify-end gap-2 mt-4'):
+                ui.button('Cancel', on_click=dialog.close).props('flat')
+
+                def add_and_login():
+                    password = pw_input.value or ''
+                    if self._on_add_room:
+                        self._on_add_room(pubkey, contact_name, password)
+                    dialog.close()
+
                 ui.button(
-                    'Remove',
-                    on_click=confirm_purge,
-                ).classes('bg-red-500 text-white')
+                    'Add & Login',
+                    on_click=add_and_login,
+                ).classes('bg-blue-500 text-white')
 
         dialog.open()
 

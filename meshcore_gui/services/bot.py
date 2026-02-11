@@ -23,7 +23,7 @@ from meshcore_gui.config import debug_print
 # Bot defaults (previously in config.py)
 # ==============================================================================
 
-# Channel indices the bot listens on (must match CHANNELS_CONFIG).
+# Channel indices the bot listens on (must match device channels).
 BOT_CHANNELS: frozenset = frozenset({1, 4})  # #test, #bot
 
 # Display name prepended to every bot reply.

@@ -30,15 +30,16 @@ v5.1 changes
 import asyncio
 import threading
 import time
-from typing import Optional, Set
+from typing import Dict, List, Optional, Set
 
 from meshcore import MeshCore, EventType
 
 from meshcore_gui.config import (
     BLE_DEFAULT_TIMEOUT,
     BLE_LIB_DEBUG,
-    CHANNELS_CONFIG,
+    CHANNEL_CACHE_ENABLED,
     CONTACT_REFRESH_SECONDS,
+    MAX_CHANNELS,
     debug_data,
     debug_print,
     pp,
@@ -87,6 +88,9 @@ class BLEWorker:
 
         # Channel indices that still need keys from device
         self._pending_keys: Set[int] = set()
+
+        # Dynamically discovered channels from device
+        self._channels: List[Dict] = []
 
     # ------------------------------------------------------------------
     # Thread lifecycle
@@ -166,10 +170,10 @@ class BLEWorker:
             self.mc.subscribe(EventType.CHANNEL_MSG_RECV, self._evt_handler.on_channel_msg)
             self.mc.subscribe(EventType.CONTACT_MSG_RECV, self._evt_handler.on_contact_msg)
             self.mc.subscribe(EventType.RX_LOG_DATA, self._evt_handler.on_rx_log)
+            self.mc.subscribe(EventType.LOGIN_SUCCESS, self._on_login_success)
 
-            # Phase 3: Load data and keys from device (updates cache)
+            # Phase 3: Load data from device (includes channel discovery + keys)
             await self._load_data()
-            await self._load_channel_keys()
             await self.mc.start_auto_message_fetching()
 
             self.shared.set_connected(True)
@@ -179,7 +183,7 @@ class BLEWorker:
             if self._pending_keys:
                 pending_names = [
                     f"[{ch['idx']}] {ch['name']}"
-                    for ch in CHANNELS_CONFIG
+                    for ch in self._channels
                     if ch['idx'] in self._pending_keys
                 ]
                 print(
@@ -194,6 +198,35 @@ class BLEWorker:
                 self.shared.set_status(f"⚠️ Offline — using cached data ({e})")
             else:
                 self.shared.set_status(f"❌ {e}")
+
+    # ------------------------------------------------------------------
+    # LOGIN_SUCCESS handler (Room Server)
+    # ------------------------------------------------------------------
+
+    def _on_login_success(self, event) -> None:
+        """Handle LOGIN_SUCCESS from a Room Server.
+
+        After login the Room Server pushes stored messages over RF using
+        round-robin.  Each message travels via LoRa to the companion
+        radio, which buffers it and emits ``MESSAGES_WAITING``.  The
+        library's ``auto_message_fetching`` already handles that event,
+        so no extra polling is needed here.
+
+        Note: the login state is updated by ``_cmd_login_room`` via
+        ``wait_for_event``, so we do NOT set it here to avoid creating
+        a second entry with a different key (prefix vs full pubkey).
+        """
+        payload = event.payload or {}
+        pubkey = payload.get('pubkey_prefix', '')
+        is_admin = payload.get('is_admin', False)
+        debug_print(
+            f"LOGIN_SUCCESS received: pubkey={pubkey}, "
+            f"admin={is_admin}"
+        )
+
+        self.shared.set_status(
+            "✅ Room login OK — messages arriving over RF…"
+        )
 
     # ------------------------------------------------------------------
     # Apply cache to SharedData
@@ -211,10 +244,15 @@ class BLEWorker:
             self.shared.set_status("📦 Loaded from cache")
             debug_print(f"Cache → device info: {device.get('name', '?')}")
 
-        channels = self._cache.get_channels()
-        if channels:
-            self.shared.set_channels(channels)
-            debug_print(f"Cache → channels: {[c['name'] for c in channels]}")
+        # Only load channels from cache when channel caching is enabled
+        if CHANNEL_CACHE_ENABLED:
+            channels = self._cache.get_channels()
+            if channels:
+                self._channels = channels
+                self.shared.set_channels(channels)
+                debug_print(f"Cache → channels: {[c['name'] for c in channels]}")
+        else:
+            debug_print("Channel cache disabled — skipping cached channels")
 
         contacts = self._cache.get_contacts()
         if contacts:
@@ -334,12 +372,9 @@ class BLEWorker:
             await asyncio.sleep(2.0)
 
         # ----------------------------------------------------------
-        # Channels (hardcoded — BLE get_channel is unreliable)
+        # Channels (dynamic discovery from device)
         # ----------------------------------------------------------
-        self.shared.set_status("🔄 Channels...")
-        self.shared.set_channels(CHANNELS_CONFIG)
-        self._cache.set_channels(CHANNELS_CONFIG)
-        print(f"BLE: Channels loaded: {[c['name'] for c in CHANNELS_CONFIG]}")
+        await self._discover_channels()
 
         # ----------------------------------------------------------
         # Contacts (merge with cache)
@@ -375,69 +410,129 @@ class BLEWorker:
     # Channel key loading (quick startup + background retry)
     # ------------------------------------------------------------------
 
-    async def _load_channel_keys(self) -> None:
-        """Try to load channel keys from device — quick pass at startup.
+    async def _discover_channels(self) -> None:
+        """Discover channels and load their keys from the device.
 
-        Each channel gets 2 quick attempts.  Channels that fail are
-        added to ``_pending_keys`` for background retry every
+        Probes channel indices 0..MAX_CHANNELS-1 via ``get_channel()``.
+        Each successful response provides both the channel name and the
+        encryption key, so discovery and key loading happen in a single
+        pass.
+
+        Speed strategy: single attempt per slot with short delays.
+        Channels whose keys fail are retried in the background every
         ``KEY_RETRY_INTERVAL`` seconds.
 
-        Priority:
-        1. Key from device (get_channel → channel_secret)
-        2. Key already in cache (preserved, not overwritten)
-        3. Key derived from channel name (last resort, only if no cache)
+        When ``CHANNEL_CACHE_ENABLED`` is True the discovered channel
+        list is persisted to disk cache.  Channel keys are always
+        cached regardless of this setting (they are needed for packet
+        decoding on next startup).
         """
-        self.shared.set_status("🔄 Channel keys...")
+        self.shared.set_status("🔄 Discovering channels...")
+        discovered: List[Dict] = []
         cached_keys = self._cache.get_channel_keys()
 
         confirmed: list[str] = []
         from_cache: list[str] = []
-        pending: list[str] = []
         derived: list[str] = []
 
-        for ch_num, ch in enumerate(CHANNELS_CONFIG):
-            idx, name = ch['idx'], ch['name']
+        consecutive_errors = 0
 
-            # Quick startup attempt: 2 tries per channel
-            loaded = await self._try_load_channel_key(idx, name, max_attempts=2, delay=1.0)
+        for idx in range(MAX_CHANNELS):
+            # Fast single-attempt probe per slot
+            payload = await self._try_get_channel_info(
+                idx, max_attempts=1, delay=0.5,
+            )
 
-            if loaded:
+            if payload is None:
+                consecutive_errors += 1
+                # After 2 consecutive empty slots, assume no more channels
+                if consecutive_errors >= 2:
+                    debug_print(
+                        f"Channel discovery: {consecutive_errors} consecutive "
+                        f"empty slots at idx {idx}, stopping"
+                    )
+                    break
+                continue
+
+            # Reset consecutive error counter on success
+            consecutive_errors = 0
+
+            # Extract channel name (try common field names)
+            name = (
+                payload.get('name')
+                or payload.get('channel_name')
+                or ''
+            )
+
+            # Skip undefined/empty channel slots
+            if not name.strip():
+                debug_print(
+                    f"Channel [{idx}]: response OK but no name — "
+                    f"skipping (undefined slot)"
+                )
+                continue
+
+            discovered.append({'idx': idx, 'name': name})
+
+            # Extract key in the same pass
+            secret = payload.get('channel_secret')
+            secret_bytes = self._extract_secret(secret)
+
+            if secret_bytes:
+                self._decoder.add_channel_key(idx, secret_bytes, source="device")
+                self._cache.set_channel_key(idx, secret_bytes.hex())
+                self._pending_keys.discard(idx)
                 confirmed.append(f"[{idx}] {name}")
             elif str(idx) in cached_keys:
-                # Cache has the key — don't overwrite with name-derived
+                # Cache has the key — use it, don't overwrite
                 from_cache.append(f"[{idx}] {name}")
                 print(f"BLE: 📦 Channel [{idx}] '{name}' — using cached key")
             else:
-                # No device key, no cache key — derive from name as temporary fallback
+                # No device key, no cache key — derive from name
                 self._decoder.add_channel_key_from_name(idx, name)
-                derived.append(f"[{idx}] {name}")
-                # Mark for background retry
                 self._pending_keys.add(idx)
-                print(f"BLE: ⚠️  Channel [{idx}] '{name}' — name-derived key (will retry)")
+                derived.append(f"[{idx}] {name}")
+                print(
+                    f"BLE: ⚠️  Channel [{idx}] '{name}' — "
+                    f"name-derived key (will retry)"
+                )
 
-            # Brief pause between channels
-            if ch_num < len(CHANNELS_CONFIG) - 1:
-                await asyncio.sleep(0.5)
+            # Minimal pause between channels to avoid BLE congestion
+            await asyncio.sleep(0.15)
 
-        # Summary
+        # Fallback: if nothing discovered, add Public as default
+        if not discovered:
+            discovered = [{'idx': 0, 'name': 'Public'}]
+            print("BLE: ⚠️ No channels discovered, using default Public channel")
+
+        # Store discovered channels
+        self._channels = discovered
+        self.shared.set_channels(discovered)
+        if CHANNEL_CACHE_ENABLED:
+            self._cache.set_channels(discovered)
+            debug_print("Channel list cached to disk")
+
+        print(f"BLE: Channels discovered: {[c['name'] for c in discovered]}")
+
+        # Key summary
         print(f"BLE: PacketDecoder ready — has_keys={self._decoder.has_keys}")
         if confirmed:
-            print(f"BLE: ✅ From device: {', '.join(confirmed)}")
+            print(f"BLE: ✅ Keys from device: {', '.join(confirmed)}")
         if from_cache:
-            print(f"BLE: 📦 From cache: {', '.join(from_cache)}")
+            print(f"BLE: 📦 Keys from cache: {', '.join(from_cache)}")
         if derived:
-            print(f"BLE: ⚠️  Name-derived: {', '.join(derived)}")
+            print(f"BLE: ⚠️  Name-derived keys: {', '.join(derived)}")
 
-    async def _try_load_channel_key(
+    async def _try_get_channel_info(
         self,
         idx: int,
-        name: str,
         max_attempts: int,
         delay: float,
-    ) -> bool:
-        """Try to load a single channel key from the device.
+    ) -> Optional[Dict]:
+        """Try to get channel info from the device.
 
-        Returns True if the key was successfully loaded and cached.
+        Returns the response payload dict on success, or None if the
+        channel does not exist or could not be read after all attempts.
         """
         for attempt in range(max_attempts):
             try:
@@ -459,40 +554,54 @@ class BLEWorker:
                     await asyncio.sleep(delay)
                     continue
 
-                secret = r.payload.get('channel_secret')
                 debug_print(
                     f"get_channel({idx}) attempt {attempt + 1}/{max_attempts}: "
-                    f"type={type(secret).__name__}, "
-                    f"len={len(secret) if secret else 0}, "
-                    f"keys={list(r.payload.keys())}"
+                    f"OK — keys={list(r.payload.keys())}"
                 )
-
-                # Extract secret bytes (handles both bytes and hex string)
-                secret_bytes = self._extract_secret(secret)
-                if secret_bytes:
-                    self._decoder.add_channel_key(idx, secret_bytes, source="device")
-                    self._cache.set_channel_key(idx, secret_bytes.hex())
-                    print(
-                        f"BLE: ✅ Channel [{idx}] '{name}' — "
-                        f"key from device (attempt {attempt + 1})"
-                    )
-                    # Remove from pending if it was there
-                    self._pending_keys.discard(idx)
-                    return True
-
-                debug_print(
-                    f"get_channel({idx}) attempt {attempt + 1}/{max_attempts}: "
-                    f"response OK but secret unusable"
-                )
+                return r.payload
 
             except Exception as exc:
                 debug_print(
                     f"get_channel({idx}) attempt {attempt + 1}/{max_attempts} "
                     f"error: {exc}"
                 )
+                await asyncio.sleep(delay)
 
-            await asyncio.sleep(delay)
+        return None
 
+    async def _try_load_channel_key(
+        self,
+        idx: int,
+        name: str,
+        max_attempts: int,
+        delay: float,
+    ) -> bool:
+        """Try to load a single channel key from the device.
+
+        Returns True if the key was successfully loaded and cached.
+        Used by background retry for channels that failed during
+        initial discovery.
+        """
+        payload = await self._try_get_channel_info(idx, max_attempts, delay)
+        if payload is None:
+            return False
+
+        secret = payload.get('channel_secret')
+        secret_bytes = self._extract_secret(secret)
+
+        if secret_bytes:
+            self._decoder.add_channel_key(idx, secret_bytes, source="device")
+            self._cache.set_channel_key(idx, secret_bytes.hex())
+            print(
+                f"BLE: ✅ Channel [{idx}] '{name}' — "
+                f"key from device (background retry)"
+            )
+            self._pending_keys.discard(idx)
+            return True
+
+        debug_print(
+            f"get_channel({idx}): response OK but secret unusable"
+        )
         return False
 
     async def _retry_missing_keys(self) -> None:
@@ -506,7 +615,7 @@ class BLEWorker:
             return
 
         pending_copy = set(self._pending_keys)
-        ch_map = {ch['idx']: ch['name'] for ch in CHANNELS_CONFIG}
+        ch_map = {ch['idx']: ch['name'] for ch in self._channels}
 
         debug_print(
             f"Background key retry: trying {len(pending_copy)} channels"

@@ -19,9 +19,11 @@ from meshcore_gui.gui.panels import (
     InputPanel,
     MapPanel,
     MessagesPanel,
+    RoomServerPanel,
     RxLogPanel,
 )
 from meshcore_gui.services.pin_store import PinStore
+from meshcore_gui.services.room_password_store import RoomPasswordStore
 
 
 # Suppress the harmless "Client has been deleted" warning that NiceGUI
@@ -40,9 +42,10 @@ class DashboardPage:
         shared: SharedDataReader for data access and command dispatch.
     """
 
-    def __init__(self, shared: SharedDataReader, pin_store: PinStore) -> None:
+    def __init__(self, shared: SharedDataReader, pin_store: PinStore, room_password_store: RoomPasswordStore) -> None:
         self._shared = shared
         self._pin_store = pin_store
+        self._room_password_store = room_password_store
 
         # Panels (created fresh on each render)
         self._device: DevicePanel | None = None
@@ -53,6 +56,7 @@ class DashboardPage:
         self._messages: MessagesPanel | None = None
         self._actions: ActionsPanel | None = None
         self._rxlog: RxLogPanel | None = None
+        self._room_server: RoomServerPanel | None = None
 
         # Header status label
         self._status_label = None
@@ -71,13 +75,14 @@ class DashboardPage:
         # Create panel instances
         put_cmd = self._shared.put_command
         self._device = DevicePanel()
-        self._contacts = ContactsPanel(put_cmd, self._pin_store, self._shared.set_auto_add_enabled)
+        self._contacts = ContactsPanel(put_cmd, self._pin_store, self._shared.set_auto_add_enabled, self._on_add_room_server)
         self._map = MapPanel()
         self._input = InputPanel(put_cmd)
         self._filter = FilterPanel(self._shared.set_bot_enabled, put_cmd)
         self._messages = MessagesPanel()
         self._actions = ActionsPanel(put_cmd)
         self._rxlog = RxLogPanel()
+        self._room_server = RoomServerPanel(put_cmd, self._room_password_store)
 
         ui.dark_mode(False)
 
@@ -100,6 +105,7 @@ class DashboardPage:
                 self._input.render()
                 self._filter.render()
                 self._messages.render()
+                self._room_server.render()
 
             # Right column
             with ui.column().classes('w-64 gap-2'):
@@ -108,6 +114,19 @@ class DashboardPage:
 
         # Start update timer
         ui.timer(0.5, self._update_ui)
+
+    # ------------------------------------------------------------------
+    # Room Server callback (from ContactsPanel)
+    # ------------------------------------------------------------------
+
+    def _on_add_room_server(self, pubkey: str, name: str, password: str) -> None:
+        """Handle adding a Room Server from the contacts panel.
+
+        Delegates to the RoomServerPanel which persists the entry,
+        creates the UI card and sends the login command.
+        """
+        if self._room_server:
+            self._room_server.add_room(pubkey, name, password)
 
     # ------------------------------------------------------------------
     # Timer-driven UI update
@@ -120,6 +139,12 @@ class DashboardPage:
 
             data = self._shared.get_snapshot()
             is_first = not self._initialized
+
+            # Mark initialised immediately — even if a panel update
+            # crashes below, we must NOT retry the full first-render
+            # path every 500 ms (that causes the infinite rebuild).
+            if is_first:
+                self._initialized = True
 
             # Always update status
             self._status_label.text = data['status']
@@ -148,20 +173,26 @@ class DashboardPage:
                 data,
                 self._filter.channel_filters,
                 self._filter.last_channels,
+                room_pubkeys=self._room_server.get_room_pubkeys() if self._room_server else None,
             )
+
+            # Room Server panels (always — for live messages + contact changes)
+            self._room_server.update(data)
 
             # RX Log
             if data['rxlog_updated']:
                 self._rxlog.update(data)
 
-            # Clear flags and mark initialised
+            # Clear flags
             self._shared.clear_update_flags()
 
+            # Signal BLE worker that GUI is ready for data
             if is_first and data['channels'] and data['contacts']:
-                self._initialized = True
                 self._shared.mark_gui_initialized()
 
         except Exception as e:
             err = str(e).lower()
             if "deleted" not in err and "client" not in err:
+                import traceback
                 print(f"GUI update error: {e}")
+                traceback.print_exc()

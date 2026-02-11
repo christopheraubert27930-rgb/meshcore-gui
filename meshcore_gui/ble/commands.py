@@ -46,6 +46,10 @@ class CommandHandler:
             'purge_unpinned': self._cmd_purge_unpinned,
             'set_auto_add': self._cmd_set_auto_add,
             'set_device_name': self._cmd_set_device_name,
+            'login_room': self._cmd_login_room,
+            'logout_room': self._cmd_logout_room,
+            'send_room_msg': self._cmd_send_room_msg,
+            'load_room_history': self._cmd_load_room_history,
         }
 
     async def process_all(self) -> None:
@@ -122,14 +126,20 @@ class CommandHandler:
         overwhelming the BLE link.  After completion, triggers a
         full refresh so the GUI reflects the new state.
 
+        If ``delete_from_history`` is True, also removes the
+        contacts from the local device cache on disk.
+
         Expected command dict::
 
             {
                 'action': 'purge_unpinned',
                 'pubkeys': ['aabbcc...', ...],
+                'delete_from_history': True/False,
             }
         """
         pubkeys: List[str] = cmd.get('pubkeys', [])
+        delete_from_history: bool = cmd.get('delete_from_history', False)
+
         if not pubkeys:
             self._shared.set_status("⚠️ No contacts to remove")
             return
@@ -174,6 +184,14 @@ class CommandHandler:
             if i < total:
                 await asyncio.sleep(0.5)
 
+        # Delete from local cache if requested
+        if delete_from_history and self._cache:
+            cache_removed = self._cache.remove_contacts(pubkeys)
+            debug_print(
+                f"Purge: removed {cache_removed} contacts "
+                f"from local history"
+            )
+
         # Summary
         if errors:
             status = (
@@ -181,7 +199,8 @@ class CommandHandler:
                 f"{errors} failed"
             )
         else:
-            status = f"✅ {removed} contacts removed from device"
+            history_suffix = " and local history" if delete_from_history else ""
+            status = f"✅ {removed} contacts removed from device{history_suffix}"
 
         self._shared.set_status(status)
         print(f"Purge: {status}")
@@ -303,6 +322,233 @@ class CommandHandler:
             self._shared.set_bot_enabled(not bot_enabled)
             self._shared.set_status(f"⚠️ Device name error: {exc}")
             debug_print(f"set_device_name exception: {exc}")
+
+    async def _cmd_login_room(self, cmd: Dict) -> None:
+        """Login to a Room Server.
+
+        Follows the reference implementation (meshcore-cli):
+        1. ``send_login()`` → wait for ``MSG_SENT`` (companion radio sent LoRa packet)
+        2. ``wait_for_event(LOGIN_SUCCESS)`` → wait for room server confirmation
+        3. After LOGIN_SUCCESS, the room server starts pushing historical
+           messages over RF.  ``auto_message_fetching`` handles those.
+
+        Expected command dict::
+
+            {
+                'action': 'login_room',
+                'pubkey': '<hex public key>',
+                'password': '<room password>',
+                'room_name': '<display name>',
+            }
+        """
+        pubkey: str = cmd.get('pubkey', '')
+        password: str = cmd.get('password', '')
+        room_name: str = cmd.get('room_name', pubkey[:8])
+
+        if not pubkey:
+            self._shared.set_status("⚠️ Room login: no pubkey")
+            return
+
+        # Load archived room messages so the panel shows history
+        # while we wait for the LoRa login handshake.
+        self._shared.load_room_history(pubkey)
+
+        # Mark pending in SharedData so the panel can update
+        self._shared.set_room_login_state(pubkey, 'pending', 'Sending login…')
+
+        try:
+            # Step 1: Send login request to companion radio
+            self._shared.set_status(
+                f"🔄 Sending login to {room_name}…"
+            )
+            r = await self._mc.commands.send_login(pubkey, password)
+
+            if r.type == EventType.ERROR:
+                self._shared.set_room_login_state(
+                    pubkey, 'fail', 'Login send failed',
+                )
+                self._shared.set_status(
+                    f"⚠️ Room login failed: {room_name}"
+                )
+                debug_print(
+                    f"login_room: send_login ERROR for {room_name} "
+                    f"({pubkey[:16]})"
+                )
+                return
+
+            # Step 2: Wait for LOGIN_SUCCESS from room server via LoRa
+            # Use suggested_timeout from companion radio if available,
+            # otherwise default to 120 seconds (LoRa can be slow).
+            suggested = (r.payload or {}).get('suggested_timeout', 96000)
+            timeout_secs = max(suggested / 800, 30.0)
+
+            self._shared.set_status(
+                f"⏳ Waiting for room server response ({room_name})…"
+            )
+            debug_print(
+                f"login_room: MSG_SENT OK, waiting for LOGIN_SUCCESS "
+                f"(timeout={timeout_secs:.0f}s)"
+            )
+
+            login_event = await self._mc.wait_for_event(
+                EventType.LOGIN_SUCCESS, timeout=timeout_secs,
+            )
+
+            if login_event and login_event.type == EventType.LOGIN_SUCCESS:
+                is_admin = (login_event.payload or {}).get('is_admin', False)
+                self._shared.set_room_login_state(
+                    pubkey, 'ok',
+                    f"admin={is_admin}",
+                )
+                self._shared.set_status(
+                    f"✅ Room login OK: {room_name} — "
+                    f"history arriving over RF…"
+                )
+                debug_print(
+                    f"login_room: LOGIN_SUCCESS for {room_name} "
+                    f"(admin={is_admin})"
+                )
+
+                # Defensive: trigger one get_msg() to check for any
+                # messages already waiting in the companion radio's
+                # offline queue.  auto_message_fetching handles the
+                # rest via MESSAGES_WAITING events.
+                try:
+                    await self._mc.commands.get_msg()
+                    debug_print("login_room: defensive get_msg() done")
+                except Exception as exc:
+                    debug_print(f"login_room: defensive get_msg() error: {exc}")
+
+            else:
+                self._shared.set_room_login_state(
+                    pubkey, 'fail',
+                    'Timeout — no response from room server',
+                )
+                self._shared.set_status(
+                    f"⚠️ Room login timeout: {room_name} "
+                    f"(no response after {timeout_secs:.0f}s)"
+                )
+                debug_print(
+                    f"login_room: LOGIN_SUCCESS timeout for "
+                    f"{room_name} ({pubkey[:16]})"
+                )
+
+        except Exception as exc:
+            self._shared.set_room_login_state(
+                pubkey, 'fail', str(exc),
+            )
+            self._shared.set_status(
+                f"⚠️ Room login error: {exc}"
+            )
+            debug_print(f"login_room exception: {exc}")
+
+    async def _cmd_logout_room(self, cmd: Dict) -> None:
+        """Logout from a Room Server.
+
+        Sends a logout command to the companion radio so it stops
+        keep-alive pings and the room server deregisters the client.
+        This resets the server-side ``sync_since`` state, ensuring
+        that the next login will receive the full message history.
+
+        Expected command dict::
+
+            {
+                'action': 'logout_room',
+                'pubkey': '<hex public key>',
+                'room_name': '<display name>',
+            }
+        """
+        pubkey: str = cmd.get('pubkey', '')
+        room_name: str = cmd.get('room_name', pubkey[:8])
+
+        if not pubkey:
+            return
+
+        try:
+            r = await self._mc.commands.send_logout(pubkey)
+            if r.type == EventType.ERROR:
+                debug_print(
+                    f"logout_room: ERROR for {room_name} "
+                    f"({pubkey[:16]})"
+                )
+            else:
+                debug_print(
+                    f"logout_room: OK for {room_name} "
+                    f"({pubkey[:16]})"
+                )
+        except AttributeError:
+            # Library may not have send_logout — fall back to silent
+            debug_print(
+                f"logout_room: send_logout not available in library, "
+                f"skipping for {room_name}"
+            )
+        except Exception as exc:
+            debug_print(f"logout_room exception: {exc}")
+
+        self._shared.set_room_login_state(pubkey, 'logged_out')
+        self._shared.set_status(
+            f"Logged out from {room_name}"
+        )
+
+    async def _cmd_load_room_history(self, cmd: Dict) -> None:
+        """Load archived room messages into the in-memory cache.
+
+        Called when a room card is rendered so the panel can display
+        historical messages even before login.  Also safe to call
+        after login to refresh.
+
+        Expected command dict::
+
+            {
+                'action': 'load_room_history',
+                'pubkey': '<hex public key>',
+            }
+        """
+        pubkey: str = cmd.get('pubkey', '')
+        if pubkey:
+            self._shared.load_room_history(pubkey)
+
+    async def _cmd_send_room_msg(self, cmd: Dict) -> None:
+        """Send a message to a Room Server (post to room).
+
+        Uses ``send_msg`` with the Room Server's public key, which
+        is the standard way to post a message to a room after login.
+
+        Expected command dict::
+
+            {
+                'action': 'send_room_msg',
+                'pubkey': '<hex public key>',
+                'text': '<message text>',
+                'room_name': '<display name>',
+            }
+        """
+        pubkey: str = cmd.get('pubkey', '')
+        text: str = cmd.get('text', '')
+        room_name: str = cmd.get('room_name', pubkey[:8])
+
+        if not text or not pubkey:
+            return
+
+        try:
+            await self._mc.commands.send_msg(pubkey, text)
+            self._shared.add_message(Message(
+                time=datetime.now().strftime('%H:%M:%S'),
+                sender='Me',
+                text=text,
+                channel=None,
+                direction='out',
+                sender_pubkey=pubkey,
+            ))
+            debug_print(
+                f"send_room_msg: sent to {room_name}: "
+                f"{text[:30]}"
+            )
+        except Exception as exc:
+            self._shared.set_status(
+                f"⚠️ Room message error: {exc}"
+            )
+            debug_print(f"send_room_msg exception: {exc}")
 
     # ------------------------------------------------------------------
     # Callback for refresh (set by BLEWorker after construction)

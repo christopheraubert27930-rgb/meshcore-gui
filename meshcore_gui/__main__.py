@@ -37,6 +37,7 @@ from meshcore_gui.gui.dashboard import DashboardPage
 from meshcore_gui.gui.route_page import RoutePage
 from meshcore_gui.gui.archive_page import ArchivePage
 from meshcore_gui.services.pin_store import PinStore
+from meshcore_gui.services.room_password_store import RoomPasswordStore
 
 
 # Global instances (needed by NiceGUI page decorators)
@@ -110,7 +111,8 @@ def main():
     # Assemble components
     _shared = SharedData(ble_address)
     _pin_store = PinStore(ble_address)
-    _dashboard = DashboardPage(_shared, _pin_store)
+    _room_password_store = RoomPasswordStore(ble_address)
+    _dashboard = DashboardPage(_shared, _pin_store, _room_password_store)
     _route_page = RoutePage(_shared)
     _archive_page = ArchivePage(_shared)
 
