@@ -128,6 +128,7 @@ class MessageArchive:
                 "sender": msg.sender,
                 "text": msg.text,
                 "channel": msg.channel,
+                "channel_name": msg.channel_name,
                 "direction": msg.direction,
                 "snr": msg.snr,
                 "path_len": msg.path_len,
@@ -430,6 +431,48 @@ class MessageArchive:
         temp_path.replace(path)
 
     # ------------------------------------------------------------------
+    # Channel name discovery
+    # ------------------------------------------------------------------
+
+    def get_distinct_channel_names(self) -> list:
+        """Return a sorted list of distinct channel names from archived messages.
+
+        Scans all stored messages and collects unique ``channel_name``
+        values.  Empty or missing names are excluded.
+
+        Returns:
+            Sorted list of unique channel name strings.
+        """
+        with self._lock:
+            # Flush pending writes so we don't miss recent messages
+            self._flush_messages()
+
+            if not self._messages_path.exists():
+                return []
+
+            try:
+                data = json.loads(
+                    self._messages_path.read_text(encoding="utf-8")
+                )
+                if data.get("version") != ARCHIVE_VERSION:
+                    return []
+
+                messages = data.get("messages", [])
+                names: set = set()
+                for msg in messages:
+                    name = msg.get("channel_name", "")
+                    if name:
+                        names.add(name)
+
+                return sorted(names)
+
+            except (json.JSONDecodeError, OSError) as exc:
+                debug_print(
+                    f"Archive: error reading distinct channel names: {exc}"
+                )
+                return []
+
+    # ------------------------------------------------------------------
     # Stats
     # ------------------------------------------------------------------
 
@@ -499,7 +542,7 @@ class MessageArchive:
         self,
         after: Optional[datetime] = None,
         before: Optional[datetime] = None,
-        channel: Optional[int] = None,
+        channel_name: Optional[str] = None,
         sender: Optional[str] = None,
         text_search: Optional[str] = None,
         limit: int = 100,
@@ -510,7 +553,7 @@ class MessageArchive:
         Args:
             after: Only messages after this timestamp (UTC).
             before: Only messages before this timestamp (UTC).
-            channel: Filter by channel index.
+            channel_name: Filter by channel name (exact match).
             sender: Filter by sender name (case-insensitive substring match).
             text_search: Search in message text (case-insensitive substring match).
             limit: Maximum number of results to return.
@@ -549,9 +592,10 @@ class MessageArchive:
                         except (ValueError, TypeError):
                             continue
                     
-                    # Channel filter
-                    if channel is not None and msg.get("channel") != channel:
-                        continue
+                    # Channel name filter (exact match)
+                    if channel_name is not None:
+                        if msg.get("channel_name", "") != channel_name:
+                            continue
                     
                     # Sender filter (case-insensitive substring)
                     if sender:

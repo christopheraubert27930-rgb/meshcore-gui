@@ -289,10 +289,15 @@ class SharedData:
     def add_message(self, msg: Message) -> None:
         """Add a Message to the store (max 100).
 
-        Also appends to the room-message cache if the sender matches
-        a known room, keeping archive and cache in sync.
+        Also resolves channel_name from the current channels list if not
+        already set, and appends to the room-message cache if the sender
+        matches a known room, keeping archive and cache in sync.
         """
         with self.lock:
+            # Resolve channel_name if missing
+            if not msg.channel_name and msg.channel is not None:
+                msg.channel_name = self._resolve_channel_name(msg.channel)
+
             self.messages.append(msg)
             if len(self.messages) > 100:
                 self.messages.pop(0)
@@ -310,6 +315,23 @@ class SharedData:
             if self.archive:
                 self.archive.add_message(msg)
 
+    def _resolve_channel_name(self, channel_idx: int) -> str:
+        """Resolve a channel index to its display name.
+
+        MUST be called with self.lock held.
+
+        Args:
+            channel_idx: Numeric channel index.
+
+        Returns:
+            Channel name string, or ``'Ch <idx>'`` as fallback.
+        """
+        for ch in self.channels:
+            ch_idx = ch.get('idx', ch.get('index', 0))
+            if ch_idx == channel_idx:
+                return ch.get('name', f'Ch {channel_idx}')
+        return f'Ch {channel_idx}'
+
     def add_rx_log(self, entry: RxLogEntry) -> None:
         """Add an RxLogEntry (max 50, newest first)."""
         with self.lock:
@@ -321,6 +343,44 @@ class SharedData:
             # Archive entry for persistent storage
             if self.archive:
                 self.archive.add_rx_log(entry)
+
+    def load_recent_from_archive(self, limit: int = 100) -> int:
+        """Load the most recent archived messages into the in-memory list.
+
+        Intended for startup: populates ``self.messages`` from the
+        persistent archive so the main page shows historical messages
+        immediately, before any live BLE traffic arrives.
+
+        Messages are inserted directly (not re-archived) to avoid
+        duplicating data on disk.
+
+        Args:
+            limit: Maximum number of messages to load.
+
+        Returns:
+            Number of messages loaded.
+        """
+        if not self.archive:
+            return 0
+
+        recent, _ = self.archive.query_messages(limit=limit)
+        if not recent:
+            return 0
+
+        with self.lock:
+            # recent is newest-first; reverse so oldest is appended first
+            for msg_dict in reversed(recent):
+                msg = Message.from_dict(msg_dict)
+                self.messages.append(msg)
+
+            # Cap at 100 (same as add_message)
+            if len(self.messages) > 100:
+                self.messages = self.messages[-100:]
+
+            debug_print(
+                f"Loaded {len(recent)} recent messages from archive"
+            )
+            return len(recent)
 
     # ------------------------------------------------------------------
     # Snapshot and flags

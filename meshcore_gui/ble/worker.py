@@ -277,6 +277,11 @@ class BLEWorker:
             self.shared.set_original_device_name(cached_orig_name)
             debug_print(f"Cache → original device name: {cached_orig_name}")
 
+        # Load recent archived messages for immediate display on main page
+        count = self.shared.load_recent_from_archive(limit=100)
+        if count:
+            debug_print(f"Cache → {count} recent messages from archive")
+
     # ------------------------------------------------------------------
     # Initial data loading (refreshes cache)
     # ------------------------------------------------------------------

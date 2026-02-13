@@ -10,13 +10,13 @@ import logging
 
 from nicegui import ui
 
+from meshcore_gui import config
+
 from meshcore_gui.core.protocols import SharedDataReader
 from meshcore_gui.gui.panels import (
     ActionsPanel,
     ContactsPanel,
     DevicePanel,
-    FilterPanel,
-    InputPanel,
     MapPanel,
     MessagesPanel,
     RoomServerPanel,
@@ -51,8 +51,6 @@ class DashboardPage:
         self._device: DevicePanel | None = None
         self._contacts: ContactsPanel | None = None
         self._map: MapPanel | None = None
-        self._input: InputPanel | None = None
-        self._filter: FilterPanel | None = None
         self._messages: MessagesPanel | None = None
         self._actions: ActionsPanel | None = None
         self._rxlog: RxLogPanel | None = None
@@ -77,10 +75,8 @@ class DashboardPage:
         self._device = DevicePanel()
         self._contacts = ContactsPanel(put_cmd, self._pin_store, self._shared.set_auto_add_enabled, self._on_add_room_server)
         self._map = MapPanel()
-        self._input = InputPanel(put_cmd)
-        self._filter = FilterPanel(self._shared.set_bot_enabled, put_cmd)
-        self._messages = MessagesPanel()
-        self._actions = ActionsPanel(put_cmd)
+        self._messages = MessagesPanel(put_cmd)
+        self._actions = ActionsPanel(put_cmd, self._shared.set_bot_enabled)
         self._rxlog = RxLogPanel()
         self._room_server = RoomServerPanel(put_cmd, self._room_password_store)
 
@@ -88,27 +84,25 @@ class DashboardPage:
 
         # Header
         with ui.header().classes('bg-blue-600 text-white'):
-            ui.label('🔗 MeshCore').classes('text-xl font-bold')
+            ui.label(f'🔗 MeshCore v{config.VERSION}').classes('text-xl font-bold')
             ui.space()
             self._status_label = ui.label('Starting...').classes('text-sm')
 
         # Three-column layout
-        with ui.row().classes('w-full h-full gap-2 p-2'):
+        with ui.row().classes('w-full h-full gap-2 p-2 flex-nowrap overflow-x-auto'):
             # Left column
             with ui.column().classes('w-72 gap-2'):
                 self._device.render()
                 self._contacts.render()
 
             # Centre column
-            with ui.column().classes('flex-grow gap-2'):
+            with ui.column().classes('flex-grow gap-2 min-w-[400px]'):
                 self._map.render()
-                self._input.render()
-                self._filter.render()
                 self._messages.render()
                 self._room_server.render()
 
             # Right column
-            with ui.column().classes('w-64 gap-2'):
+            with ui.column().classes('w-64 gap-2 flex-shrink-0'):
                 self._actions.render()
                 self._rxlog.render()
 
@@ -153,10 +147,11 @@ class DashboardPage:
             if data['device_updated'] or is_first:
                 self._device.update(data)
 
-            # Channels → filter checkboxes + input dropdown
+            # Channels → filter checkboxes + channel dropdown + BOT state
             if data['channels_updated'] or is_first:
-                self._filter.update(data)
-                self._input.update_channel_options(data['channels'])
+                self._messages.update_filters(data)
+                self._messages.update_channel_options(data['channels'])
+                self._actions.update(data)
 
             # Contacts
             if data['contacts_updated'] or is_first:
@@ -171,8 +166,8 @@ class DashboardPage:
             # Messages (always — for live filter changes)
             self._messages.update(
                 data,
-                self._filter.channel_filters,
-                self._filter.last_channels,
+                self._messages.channel_filters,
+                self._messages.last_channels,
                 room_pubkeys=self._room_server.get_room_pubkeys() if self._room_server else None,
             )
 

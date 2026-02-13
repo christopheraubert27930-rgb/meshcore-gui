@@ -1,6 +1,6 @@
-"""Messages panel — filtered message display with route navigation."""
+"""Messages panel — filtered message display with inline filters and message input."""
 
-from typing import Dict, List, Set
+from typing import Callable, Dict, List, Set
 
 from nicegui import ui
 
@@ -8,26 +8,113 @@ from meshcore_gui.core.models import Message
 
 
 class MessagesPanel:
-    """Displays filtered messages in the centre column.
+    """Displays filtered messages with inline filter checkboxes and message input.
 
-    Messages are filtered based on channel checkboxes managed by
-    :class:`~meshcore_gui.gui.panels.filter_panel.FilterPanel`.
+    Filter checkboxes (DM + channels) appear in the header row between
+    the "Messages" label and the "Archive" button.  The message input,
+    channel selector and send button appear below the message list.
+
+    Args:
+        put_command: Callable to enqueue a command dict for the BLE worker.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, put_command: Callable[[Dict], None]) -> None:
+        self._put_command = put_command
         self._container = None
+        self._filter_container = None
+        self._channel_filters: Dict = {}
+        self._last_channels: List[Dict] = []
+        self._msg_input = None
+        self._channel_select = None
+
+    # -- Properties (same as FilterPanel originals) --------------------
+
+    @property
+    def channel_filters(self) -> Dict:
+        """Current filter checkboxes (key: channel idx or ``'DM'``)."""
+        return self._channel_filters
+
+    @property
+    def last_channels(self) -> List[Dict]:
+        """Channel list from the most recent update."""
+        return self._last_channels
+
+    # -- Render --------------------------------------------------------
 
     def render(self) -> None:
         with ui.card().classes('w-full'):
-            # Header with Archive button
-            with ui.row().classes('w-full items-center justify-between'):
+            # Header row: Messages label + filter checkboxes + Archive button
+            with ui.row().classes('w-full items-center gap-2'):
                 ui.label('💬 Messages').classes('font-bold text-gray-600')
+                self._filter_container = ui.row().classes('flex-grow gap-4 items-center justify-center')
                 ui.button('📚 Archive', on_click=lambda: ui.run_javascript('window.open("/archive", "_blank")')).props('dense flat color=primary')
-            
+
+            # Message container
             self._container = ui.column().classes(
                 'w-full h-40 overflow-y-auto gap-0 text-sm font-mono '
                 'bg-gray-50 p-2 rounded'
             )
+
+            # Send message row (moved from InputPanel)
+            with ui.row().classes('w-full items-center gap-2'):
+                self._msg_input = ui.input(
+                    placeholder='Message...'
+                ).classes('flex-grow')
+
+                self._channel_select = ui.select(
+                    options={0: '[0] Public'}, value=0
+                ).classes('w-32')
+
+                ui.button(
+                    'Send', on_click=self._send_message
+                ).classes('bg-blue-500 text-white')
+
+    # -- Filter checkboxes (moved from FilterPanel) --------------------
+
+    def update_filters(self, data: Dict) -> None:
+        """Rebuild filter checkboxes when channel data changes."""
+        if not self._filter_container or not data['channels']:
+            return
+
+        self._filter_container.clear()
+        self._channel_filters = {}
+
+        with self._filter_container:
+            cb_dm = ui.checkbox('DM', value=True)
+            self._channel_filters['DM'] = cb_dm
+
+            for ch in data['channels']:
+                cb = ui.checkbox(f"[{ch['idx']}] {ch['name']}", value=True)
+                self._channel_filters[ch['idx']] = cb
+
+        self._last_channels = data['channels']
+
+    # -- Channel selector (moved from InputPanel) ----------------------
+
+    def update_channel_options(self, channels: List[Dict]) -> None:
+        """Update the channel dropdown options."""
+        if not self._channel_select or not channels:
+            return
+        opts = {ch['idx']: f"[{ch['idx']}] {ch['name']}" for ch in channels}
+        self._channel_select.options = opts
+        if self._channel_select.value not in opts:
+            self._channel_select.value = list(opts.keys())[0]
+        self._channel_select.update()
+
+    # -- Send message (moved from InputPanel) --------------------------
+
+    def _send_message(self) -> None:
+        text = self._msg_input.value
+        channel = self._channel_select.value
+        if text:
+            self._put_command({
+                'action': 'send_message',
+                'channel': channel,
+                'text': text,
+            })
+            self._msg_input.value = ''
+
+    # -- Message display -----------------------------------------------
 
     @staticmethod
     def _is_room_message(msg: Message, room_pubkeys: Set[str]) -> bool:
@@ -56,8 +143,8 @@ class MessagesPanel:
         Args:
             data:            Snapshot dict from SharedData.
             channel_filters: ``{channel_idx: checkbox, 'DM': checkbox}``
-                             from FilterPanel.
-            last_channels:   Channel list from FilterPanel.
+                             from filter checkboxes.
+            last_channels:   Channel list from filter state.
             room_pubkeys:    Pubkeys of Room Servers to exclude from
                              the general message view (shown in
                              RoomServerPanel instead).
