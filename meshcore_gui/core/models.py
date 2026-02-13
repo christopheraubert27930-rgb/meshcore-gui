@@ -38,6 +38,7 @@ class Message:
         sender_pubkey: Full public key of the sender (hex string).
         path_hashes:   List of 2-char hex strings, one per repeater.
         message_hash:  Deterministic packet identifier (hex string).
+        channel_name:  Human-readable channel name (resolved at add time).
     """
 
     time: str
@@ -50,6 +51,7 @@ class Message:
     sender_pubkey: str = ""
     path_hashes: List[str] = field(default_factory=list)
     message_hash: str = ""
+    channel_name: str = ""
 
     @staticmethod
     def from_dict(d: dict) -> "Message":
@@ -72,6 +74,7 @@ class Message:
             sender_pubkey=d.get("sender_pubkey", ""),
             path_hashes=d.get("path_hashes", []),
             message_hash=d.get("message_hash", ""),
+            channel_name=d.get("channel_name", ""),
         )
 
 

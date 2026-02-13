@@ -35,7 +35,7 @@ class ArchivePage:
         
         # Current page state (stored in app.storage.user)
         self._current_page = 0
-        self._channel_filter = None
+        self._channel_name_filter = None
         self._text_filter = ""
         self._days_back = 7  # Default: last 7 days
         
@@ -61,28 +61,28 @@ class ArchivePage:
         """Render filter controls.
         
         Args:
-            snapshot: Current snapshot containing channels data.
+            snapshot: Current snapshot containing archive data.
         """
         with ui.card().classes('w-full'):
             ui.label('Filters').classes('text-lg font-bold mb-2')
             
             with ui.row().classes('w-full gap-4 items-end'):
-                # Channel filter
+                # Channel filter (built from distinct archived channel names)
                 with ui.column().classes('flex-none'):
                     ui.label('Channel').classes('text-sm')
                     channels_options = {'All': None}
                     
-                    # Build options from snapshot channels
-                    for ch in snapshot.get('channels', []):
-                        ch_idx = ch.get('idx', ch.get('index', 0))
-                        ch_name = ch.get('name', f'Ch {ch_idx}')
-                        channels_options[ch_name] = ch_idx
+                    # Build options from distinct channel names in archive
+                    archive = snapshot.get('archive')
+                    if archive:
+                        for name in archive.get_distinct_channel_names():
+                            channels_options[name] = name
                     
                     # Find current value label
                     current_label = 'All'
-                    if self._channel_filter is not None:
+                    if self._channel_name_filter is not None:
                         for label, value in channels_options.items():
-                            if value == self._channel_filter:
+                            if value == self._channel_name_filter:
                                 current_label = label
                                 break
                     
@@ -93,7 +93,7 @@ class ArchivePage:
                     
                     def on_channel_change(e):
                         # e.value is now the label, get the actual value
-                        self._channel_filter = channels_options.get(channel_select.value)
+                        self._channel_name_filter = channels_options.get(channel_select.value)
                         self._current_page = 0
                         ui.navigate.reload()
                     
@@ -141,7 +141,7 @@ class ArchivePage:
                 
                 # Clear filters
                 def clear_filters():
-                    self._channel_filter = None
+                    self._channel_name_filter = None
                     self._text_filter = ""
                     self._days_back = 7
                     self._current_page = 0
@@ -169,7 +169,7 @@ class ArchivePage:
         # Query messages
         messages, total_count = archive.query_messages(
             after=after,
-            channel=self._channel_filter,
+            channel_name=self._channel_name_filter,
             text_search=self._text_filter if self._text_filter else None,
             limit=self._page_size,
             offset=self._current_page * self._page_size,
@@ -245,13 +245,10 @@ class ArchivePage:
         path_len = msg_dict.get('path_len', 0)
         path_hashes = msg_dict.get('path_hashes', [])
         
-        # Channel name - lookup from snapshot
-        channel_name = f'Ch {channel}'  # Default
-        for ch in snapshot.get('channels', []):
-            ch_idx = ch.get('idx', ch.get('index', 0))
-            if ch_idx == channel:
-                channel_name = ch.get('name', f'Ch {channel}')
-                break
+        # Channel name - use archived channel_name, fallback to index
+        channel_name = msg_dict.get('channel_name', '')
+        if not channel_name:
+            channel_name = f'Ch {channel}' if channel is not None else 'DM'
         
         # Direction indicator
         dir_icon = '📤' if direction == 'out' else '📥'

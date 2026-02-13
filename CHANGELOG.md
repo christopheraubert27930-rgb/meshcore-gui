@@ -8,6 +8,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) and [Semantic Ver
 
 ---
 
+## [5.9.0] - 2026-02-13 — Archive Channel Name Persistence
+
+### Added
+- ✅ **Channel name stored in archive** — Messages now persist `channel_name` alongside the numeric `channel` index in `<ADDRESS>_messages.json`, so archived messages retain their human-readable channel name even when the device is not connected
+  - `Message` dataclass: new field `channel_name: str` (default `""`, backward compatible)
+  - `SharedData.add_message()`: automatically resolves `channel_name` from the live channels list when not already set (new helper `_resolve_channel_name()`)
+  - `MessageArchive.add_message()`: writes `channel_name` to the JSON dict
+- ✅ **Archive channel selector built from archived data** — Channel filter dropdown on `/archive` now populated via `SELECT DISTINCT channel_name` on the archive instead of the live BLE channels list
+  - New method `MessageArchive.get_distinct_channel_names()` returns sorted unique channel names from stored messages
+  - Selector shows only channels that actually have archived messages
+- ✅ **Archive filter on channel name** — `MessageArchive.query_messages()` parameter changed from `channel: Optional[int]` to `channel_name: Optional[str]` (exact match on name string)
+
+### Changed
+- 🔄 `core/models.py`: Added `channel_name` field to `Message` dataclass and `from_dict()`
+- 🔄 `core/shared_data.py`: `add_message()` resolves channel name; added `_resolve_channel_name()` helper
+- 🔄 `services/message_archive.py`: `channel_name` persisted in JSON; `query_messages()` filters by name; new `get_distinct_channel_names()` method
+- 🔄 `gui/archive_page.py`: Channel selector built from `archive.get_distinct_channel_names()`; filter state changed from `_channel_filter` (int) to `_channel_name_filter` (str); message cards show `channel_name` directly from archive
+
+### Fixed
+- 🛠 **Main page empty after startup** — After a restart the messages panel showed no messages until new live BLE traffic arrived. `SharedData.load_recent_from_archive()` now loads up to 100 recent archived messages during the cache-first startup phase, so historical messages are immediately visible
+  - New method `SharedData.load_recent_from_archive(limit)` — reads from `MessageArchive.query_messages()` and populates the in-memory list without re-archiving
+  - `BLEWorker._apply_cache()` calls `load_recent_from_archive()` at the end of cache loading
+
+### Impact
+- Archived messages now self-contained — channel name visible without live BLE connection
+- Main page immediately shows historical messages after startup (no waiting for live BLE traffic)
+- Backward compatible — old archive entries without `channel_name` fall back to `"Ch <idx>"`
+- No breaking changes to existing functionality
+
+---
+
 ## [5.8.0] - 2026-02-13 — Dashboard Layout Consolidation
 
 ### Changed
