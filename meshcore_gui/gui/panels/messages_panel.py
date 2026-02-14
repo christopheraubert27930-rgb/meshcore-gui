@@ -198,6 +198,6 @@ class MessagesPanel:
                 ui.label(line).classes(
                     'text-xs leading-tight cursor-pointer '
                     'hover:bg-blue-50 rounded px-1'
-                ).on('click', lambda e, i=orig_idx, h=msg.message_hash: ui.navigate.to(
-                    f'/route/{i}-{h}', new_tab=True
+                ).on('click', lambda e, i=orig_idx: ui.navigate.to(
+                    f'/route/{i}', new_tab=True
                 ))

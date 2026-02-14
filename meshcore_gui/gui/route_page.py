@@ -38,24 +38,15 @@ class RoutePage:
     # Public
     # ------------------------------------------------------------------
 
-    def render(self, msg_index: int, msg_hash: str = '') -> None:
+    def render(self, msg_index: int) -> None:
         data = self._shared.get_snapshot()
         messages: List[Message] = data['messages']
 
-        # If a hash was provided, search for the message by hash first
-        msg = None
-        if msg_hash:
-            for m in messages:
-                if m.message_hash == msg_hash:
-                    msg = m
-                    break
+        if msg_index < 0 or msg_index >= len(messages):
+            ui.label('❌ Message not found').classes('text-xl p-8')
+            return
 
-        # Fall back to index-based lookup
-        if msg is None:
-            if msg_index < 0 or msg_index >= len(messages):
-                ui.label('❌ Message not found').classes('text-xl p-8')
-                return
-            msg = messages[msg_index]
+        msg = messages[msg_index]
         route = self._builder.build(msg, data)
 
         ui.page_title(f'Route — {msg.sender or "Unknown"}')

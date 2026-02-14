@@ -8,30 +8,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) and [Semantic Ver
 
 ---
 
-## [1.7.1] - 2026-02-13 — Bugfix: Route Page Missing Sender Name & ID
-
-### Fixed
-- 🛠 **Route page shows no sender name or ID** — Route visualization (from main page and archive) intermittently displayed no sender name and no public key ID. Three root causes identified and fixed:
-  1. **Message index race condition** — `MessagesPanel` passed the in-memory list index in the `/route/{i}` URL. By the time the route page opened in a new tab and called `get_snapshot()`, the messages list could have shifted (new messages added, old ones evicted by the 100-message cap), causing the index to point at the wrong message or no message at all. Now encodes both index and `message_hash` in the path (`/route/{i}-{hash}`) for stable lookup, with index as fallback
-  2. **Sender lookup fell through when pubkey set but contact not found** — `RouteBuilder.build()` only attempted the name-based fallback when `sender_pubkey` was empty. When pubkey was present but `get_contact_by_prefix()` returned `None` (contact renamed, not yet loaded, or lock-timing mismatch between snapshot and live data), no sender was resolved at all. Now uses a five-step cascade: live pubkey → snapshot pubkey → live name → snapshot name → message-data fallback
-  3. **Snapshot contacts not used for sender resolution** — Sender lookup queried only live SharedData (`get_contact_by_prefix()`), while path nodes already used snapshot contacts. Added snapshot contacts as lookup source for both pubkey and name matching to avoid lock-timing inconsistencies
-- 🛠 **Route page server error from main page** — Opening a route from the main page caused a server error because NiceGUI does not reliably inject `starlette.Request` or map query parameters in `@ui.page` handlers. Replaced with a single `{msg_key}` path parameter that encodes both index and hash (e.g. `/route/42-A1B2C3D4`)
-- 🛠 **Archive route ID sometimes missing** — Archived messages stored without `sender_pubkey` (contact not loaded at receive time) could not resolve the sender ID because the only name-lookup used live SharedData with a lock. Added lock-free snapshot-based name lookup (step 4) that matches the sender name against snapshot contacts, resolving the pubkey from the contact record
-
-### Changed
-- 🔄 `services/route_builder.py`: Sender lookup refactored from two separate branches (pubkey-only / name-only) to a single five-step cascade (live pubkey → snapshot pubkey → live name → snapshot name → message-data fallback); final step always creates a RouteNode so sender is never `None`
-- 🔄 `gui/route_page.py`: `render()` now accepts optional `msg_hash` parameter; searches by hash first, falls back to index; detailed debug logging added
-- 🔄 `gui/panels/messages_panel.py`: Route URL encodes message hash in the path (`/route/{i}-{hash}`)
-- 🔄 `__main__.py`: Route handler parses composite `msg_key` path parameter (string) into index and hash
-- 🔄 `meshcore_gui.py` (root entry point): Same route handler fix as `__main__.py`
-
-### Impact
-- Route page reliably shows sender name and ID for both main page and archive messages
-- Backward compatible — URLs without `msg_hash` still work via index fallback
-- No breaking changes to existing functionality
-
----
-
 ## [1.7.0] - 2026-02-13 — Archive Channel Name Persistence
 
 ### Added
