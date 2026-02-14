@@ -26,6 +26,7 @@ class MessagesPanel:
         self._last_channels: List[Dict] = []
         self._msg_input = None
         self._channel_select = None
+        self._last_fingerprint = None  # skip rebuild when unchanged
 
     # -- Properties (same as FilterPanel originals) --------------------
 
@@ -170,7 +171,12 @@ class MessagesPanel:
                     continue
             filtered.append((orig_idx, msg))
 
-        # Rebuild
+        # Rebuild only when content changed
+        fingerprint = tuple((orig_idx, id(msg)) for orig_idx, msg in filtered)
+        if fingerprint == self._last_fingerprint:
+            return
+        self._last_fingerprint = fingerprint
+
         self._container.clear()
 
         with self._container:
