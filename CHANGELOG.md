@@ -8,6 +8,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) and [Semantic Ver
 
 ---
 
+## [1.9.1] - 2026-02-14 — Bugfix: Dual Reconnect Conflict
+
+### Fixed
+- 🛠 **Library reconnect interfered with application reconnect** — The meshcore library's internal `auto_reconnect` (visible in logs as `"Attempting reconnection 1/3"`) ran a fast 3-attempt reconnect cycle without bond cleanup. This prevented the application's own `reconnect_loop` (which does `remove_bond()` + backoff) from succeeding, because BlueZ retained a stale bond → `"failed to discover service"`
+
+### Changed
+- 🔄 `ble/worker.py`: Set `auto_reconnect=False` in both `MeshCore.create_ble()` call sites (`_connect()` and `_create_fresh_connection()`), so only the application's bond-aware `reconnect_loop` handles reconnection
+- 🔄 `ble/worker.py`: Added `"failed to discover"` and `"service discovery"` to disconnect detection keywords for defensive coverage
+
+### Impact
+- Eliminates the ~9 second wasted library reconnect cycle after every BLE disconnect
+- Application's `reconnect_loop` (with bond cleanup) now runs immediately after disconnect detection
+- No breaking changes — the application reconnect logic was already fully functional
+
+---
+
 ## [1.9.0] - 2026-02-14 — BLE Connection Stability
 
 ### Added

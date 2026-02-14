@@ -169,6 +169,8 @@ class BLEWorker:
                                 "pin or key missing",
                                 "connection reset",
                                 "broken pipe",
+                                "failed to discover",
+                                "service discovery",
                             )
                         ):
                             print(f"BLE: ⚠️  Connection error detected: {e}")
@@ -210,7 +212,7 @@ class BLEWorker:
                     async def _create_fresh_connection() -> MeshCore:
                         return await MeshCore.create_ble(
                             self.address,
-                            auto_reconnect=True,
+                            auto_reconnect=False,
                             default_timeout=BLE_DEFAULT_TIMEOUT,
                             debug=BLE_LIB_DEBUG,
                         )
@@ -296,7 +298,7 @@ class BLEWorker:
         self.shared.set_status(f"🔄 Connecting to {self.address}...")
         try:
             print(f"BLE: Connecting to {self.address}...")
-            self.mc = await MeshCore.create_ble(self.address, auto_reconnect=True, default_timeout=BLE_DEFAULT_TIMEOUT, debug=BLE_LIB_DEBUG)
+            self.mc = await MeshCore.create_ble(self.address, auto_reconnect=False, default_timeout=BLE_DEFAULT_TIMEOUT, debug=BLE_LIB_DEBUG)
             print("BLE: Connected!")
 
             await asyncio.sleep(1)
