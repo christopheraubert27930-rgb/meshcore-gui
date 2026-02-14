@@ -175,25 +175,7 @@ class MessagesPanel:
 
         with self._container:
             for orig_idx, msg in reversed(filtered[-50:]):
-                direction = '→' if msg.direction == 'out' else '←'
-
-                ch_label = (
-                    f"[{channel_names.get(msg.channel, f'ch{msg.channel}')}]"
-                    if msg.channel is not None
-                    else '[DM]'
-                )
-
-                path_len = msg.path_len
-                has_path = bool(msg.path_hashes)
-                if msg.direction == 'in' and path_len > 0:
-                    hop_tag = f' [{path_len}h{"✓" if has_path else ""}]'
-                else:
-                    hop_tag = ''
-
-                if msg.sender:
-                    line = f"{msg.time} {direction} {ch_label}{hop_tag} {msg.sender}: {msg.text}"
-                else:
-                    line = f"{msg.time} {direction} {ch_label}{hop_tag} {msg.text}"
+                line = msg.format_line(channel_names)
 
                 ui.label(line).classes(
                     'text-xs leading-tight cursor-pointer '

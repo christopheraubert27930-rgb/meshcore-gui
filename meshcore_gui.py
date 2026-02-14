@@ -53,11 +53,11 @@ def _page_dashboard():
         _dashboard.render()
 
 
-@ui.page('/route/{msg_index}')
-def _page_route(msg_index: int):
+@ui.page('/route/{msg_key}')
+def _page_route(msg_key: str):
     """NiceGUI page handler — route visualization (new tab)."""
     if _route_page:
-        _route_page.render(msg_index)
+        _route_page.render(msg_key)
 
 
 @ui.page('/archive')
@@ -120,7 +120,7 @@ def main():
     worker.start()
 
     # Start NiceGUI server (blocks)
-    ui.run(title='MeshCore', host='0.0.0.0', port=8081, reload=False, storage_secret='meshcore-gui-secret')
+    ui.run(show=False, title='MeshCore', host='0.0.0.0', port=8081, reload=False, storage_secret='meshcore-gui-secret')
 
 
 if __name__ == "__main__":

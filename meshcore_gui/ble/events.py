@@ -6,7 +6,6 @@ events from the MeshCore library.  Extracted from ``BLEWorker`` so the
 worker only deals with connection lifecycle.
 """
 
-from datetime import datetime
 from typing import Dict, Optional
 
 from meshcore_gui.config import debug_print
@@ -87,7 +86,7 @@ class EventHandler:
         payload = event.payload
 
         # Extract basic RX log info
-        time_str = datetime.now().strftime('%H:%M:%S')
+        time_str = Message.now_timestamp()
         snr = payload.get('snr', 0)
         rssi = payload.get('rssi', 0)
         payload_type = payload.get('payload_type', '?')
@@ -125,12 +124,11 @@ class EventHandler:
                     snr_msg = self._extract_snr(payload)
                     path_names = self._resolve_path_names(decoded.path_hashes)
 
-                    self._shared.add_message(Message(
+                    self._shared.add_message(Message.incoming(
+                        decoded.sender,
+                        decoded.text,
+                        decoded.channel_idx,
                         time=time_str,
-                        sender=decoded.sender,
-                        text=decoded.text,
-                        channel=decoded.channel_idx,
-                        direction='in',
                         snr=snr_msg,
                         path_len=decoded.path_length,
                         sender_pubkey=sender_pubkey,
@@ -215,12 +213,10 @@ class EventHandler:
         path_hashes = self._path_cache.pop(msg_hash, []) if msg_hash else []
         path_names = self._resolve_path_names(path_hashes)
 
-        self._shared.add_message(Message(
-            time=datetime.now().strftime('%H:%M:%S'),
-            sender=sender,
-            text=msg_text,
-            channel=ch_idx,
-            direction='in',
+        self._shared.add_message(Message.incoming(
+            sender,
+            msg_text,
+            ch_idx,
             snr=snr,
             path_len=payload.get('path_len', 0),
             sender_pubkey=sender_pubkey,
@@ -277,15 +273,13 @@ class EventHandler:
             if not author:
                 author = signature[:8] if signature else '?'
 
-            self._shared.add_message(Message(
-                time=datetime.now().strftime('%H:%M:%S'),
-                sender=author,
-                text=payload.get('text', ''),
-                channel=None,
-                direction='in',
+            self._shared.add_message(Message.incoming(
+                author,
+                payload.get('text', ''),
+                None,
                 snr=self._extract_snr(payload),
                 path_len=path_len,
-                sender_pubkey=pubkey,  # room pubkey → for panel filtering
+                sender_pubkey=pubkey,
                 path_hashes=path_hashes,
                 path_names=path_names,
                 message_hash=msg_hash,
@@ -304,12 +298,10 @@ class EventHandler:
         if not sender:
             sender = pubkey[:8] if pubkey else ''
 
-        self._shared.add_message(Message(
-            time=datetime.now().strftime('%H:%M:%S'),
-            sender=sender,
-            text=payload.get('text', ''),
-            channel=None,
-            direction='in',
+        self._shared.add_message(Message.incoming(
+            sender,
+            payload.get('text', ''),
+            None,
             snr=self._extract_snr(payload),
             path_len=path_len,
             sender_pubkey=pubkey,

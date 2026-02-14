@@ -489,7 +489,7 @@ class SharedData:
             return None
         with self.lock:
             for key, contact in self.contacts.items():
-                if key.startswith(pubkey_prefix) or pubkey_prefix.startswith(key):
+                if key.lower().startswith(pubkey_prefix.lower()) or pubkey_prefix.lower().startswith(key.lower()):
                     return contact.copy()
         return None
 
@@ -498,7 +498,7 @@ class SharedData:
             return ""
         with self.lock:
             for key, contact in self.contacts.items():
-                if key.startswith(pubkey_prefix):
+                if key.lower().startswith(pubkey_prefix.lower()):
                     name = contact.get('adv_name', '')
                     if name:
                         return name

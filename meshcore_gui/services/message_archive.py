@@ -474,6 +474,48 @@ class MessageArchive:
                 return []
 
     # ------------------------------------------------------------------
+    # Single message lookup
+    # ------------------------------------------------------------------
+
+    def get_message_by_hash(self, message_hash: str) -> Optional[Dict]:
+        """Return a single archived message by its message_hash.
+
+        Args:
+            message_hash: Hex string packet identifier.
+
+        Returns:
+            Message dict, or ``None`` if not found.
+        """
+        if not message_hash:
+            return None
+
+        with self._lock:
+            # Flush pending writes so recent messages are searchable
+            self._flush_messages()
+
+            if not self._messages_path.exists():
+                return None
+
+            try:
+                data = json.loads(
+                    self._messages_path.read_text(encoding="utf-8")
+                )
+                if data.get("version") != ARCHIVE_VERSION:
+                    return None
+
+                for msg in data.get("messages", []):
+                    if msg.get("message_hash") == message_hash:
+                        return msg
+
+            except (json.JSONDecodeError, OSError) as exc:
+                debug_print(
+                    f"Archive: error looking up hash {message_hash[:16]}: "
+                    f"{exc}"
+                )
+
+        return None
+
+    # ------------------------------------------------------------------
     # Stats
     # ------------------------------------------------------------------
 

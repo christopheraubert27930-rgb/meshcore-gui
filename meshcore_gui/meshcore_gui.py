@@ -57,13 +57,7 @@ def _page_dashboard():
 def _page_route(msg_key: str):
     """NiceGUI page handler — route visualization (new tab)."""
     if _route_page:
-        parts = msg_key.split('-', 1)
-        try:
-            msg_index = int(parts[0])
-        except (ValueError, IndexError):
-            msg_index = -1
-        msg_hash = parts[1] if len(parts) > 1 else ''
-        _route_page.render(msg_index, msg_hash)
+        _route_page.render(msg_key)
 
 
 @ui.page('/archive')

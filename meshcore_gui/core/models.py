@@ -16,7 +16,8 @@ to ``dataclasses.asdict(msg)`` if a plain dict is needed.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from datetime import datetime
+from typing import Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +81,121 @@ class Message:
             message_hash=d.get("message_hash", ""),
             channel_name=d.get("channel_name", ""),
         )
+
+    # -- Timestamp helper ------------------------------------------------
+
+    @staticmethod
+    def now_timestamp() -> str:
+        """Current time formatted as ``HH:MM:SS``."""
+        return datetime.now().strftime('%H:%M:%S')
+
+    # -- Factory methods -------------------------------------------------
+
+    @classmethod
+    def incoming(
+        cls,
+        sender: str,
+        text: str,
+        channel: Optional[int],
+        *,
+        time: str = "",
+        snr: Optional[float] = None,
+        path_len: int = 0,
+        sender_pubkey: str = "",
+        path_hashes: Optional[List[str]] = None,
+        path_names: Optional[List[str]] = None,
+        message_hash: str = "",
+    ) -> "Message":
+        """Create an incoming message with auto-generated timestamp.
+
+        Args:
+            sender:        Display name of the sender.
+            text:          Message body.
+            channel:       Channel index, or ``None`` for a DM.
+            time:          Optional pre-generated timestamp (default: now).
+            snr:           Signal-to-noise ratio (dB).
+            path_len:      Hop count from the LoRa frame header.
+            sender_pubkey: Full public key of the sender (hex string).
+            path_hashes:   List of 2-char hex strings per repeater.
+            path_names:    Resolved display names for each path hash.
+            message_hash:  Deterministic packet identifier (hex string).
+        """
+        return cls(
+            time=time or cls.now_timestamp(),
+            sender=sender,
+            text=text,
+            channel=channel,
+            direction='in',
+            snr=snr,
+            path_len=path_len,
+            sender_pubkey=sender_pubkey,
+            path_hashes=path_hashes or [],
+            path_names=path_names or [],
+            message_hash=message_hash,
+        )
+
+    @classmethod
+    def outgoing(
+        cls,
+        text: str,
+        channel: Optional[int],
+        *,
+        sender_pubkey: str = "",
+    ) -> "Message":
+        """Create an outgoing message (sender ``'Me'``, auto-timestamp).
+
+        Args:
+            text:          Message body.
+            channel:       Channel index, or ``None`` for a DM.
+            sender_pubkey: Recipient public key (hex string).
+        """
+        return cls(
+            time=cls.now_timestamp(),
+            sender='Me',
+            text=text,
+            channel=channel,
+            direction='out',
+            sender_pubkey=sender_pubkey,
+        )
+
+    # -- Display formatting ----------------------------------------------
+
+    def format_line(self, channel_names: Optional[Dict[int, str]] = None) -> str:
+        """Format as a single display line for the messages panel.
+
+        Produces the same output as the original ``messages_panel.py``
+        inline formatting, e.g.::
+
+            12:34:56 ← [Public] [2h✓] PE1ABC: Hello mesh!
+
+        Args:
+            channel_names: Optional ``{channel_idx: name}`` lookup.
+                Falls back to ``self.channel_name``, then ``'ch<idx>'``.
+
+        Returns:
+            Formatted single-line string.
+        """
+        direction = '→' if self.direction == 'out' else '←'
+
+        if self.channel is not None:
+            if channel_names and self.channel in channel_names:
+                ch_name = channel_names[self.channel]
+            elif self.channel_name:
+                ch_name = self.channel_name
+            else:
+                ch_name = f'ch{self.channel}'
+            ch_label = f'[{ch_name}]'
+        else:
+            ch_label = '[DM]'
+
+        if self.direction == 'in' and self.path_len > 0:
+            hop_tag = f' [{self.path_len}h{"✓" if self.path_hashes else ""}]'
+        else:
+            hop_tag = ''
+
+        if self.sender:
+            return f"{self.time} {direction} {ch_label}{hop_tag} {self.sender}: {self.text}"
+        return f"{self.time} {direction} {ch_label}{hop_tag} {self.text}"
 
 
 # ---------------------------------------------------------------------------

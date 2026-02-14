@@ -11,8 +11,6 @@ from nicegui import ui
 
 from meshcore_gui.core.models import Message
 from meshcore_gui.core.protocols import SharedDataReadAndLookup
-from meshcore_gui.gui.constants import TYPE_LABELS
-from meshcore_gui.services.route_builder import RouteBuilder
 
 
 class ArchivePage:
@@ -31,7 +29,6 @@ class ArchivePage:
         """
         self._shared = shared
         self._page_size = page_size
-        self._builder = RouteBuilder(shared)
         
         # Current page state (stored in app.storage.user)
         self._current_page = 0
@@ -77,6 +74,9 @@ class ArchivePage:
                     if archive:
                         for name in archive.get_distinct_channel_names():
                             channels_options[name] = name
+                    
+                    # DM option (messages with channel=None)
+                    channels_options['DM'] = 'DM'
                     
                     # Find current value label
                     current_label = 'All'
@@ -166,14 +166,26 @@ class ArchivePage:
         now = datetime.now(timezone.utc)
         after = None if self._days_back >= 9999 else now - timedelta(days=self._days_back)
         
+        # Handle DM filter separately (query_messages doesn't filter by channel=None)
+        is_dm_filter = (self._channel_name_filter == 'DM')
+        query_channel = None if is_dm_filter else self._channel_name_filter
+        
         # Query messages
         messages, total_count = archive.query_messages(
             after=after,
-            channel_name=self._channel_name_filter,
+            channel_name=query_channel,
             text_search=self._text_filter if self._text_filter else None,
-            limit=self._page_size,
-            offset=self._current_page * self._page_size,
+            limit=self._page_size if not is_dm_filter else self._page_size * 5,
+            offset=self._current_page * self._page_size if not is_dm_filter else 0,
         )
+        
+        # Post-filter for DM (channel is None)
+        if is_dm_filter:
+            messages = [m for m in messages if m.get('channel') is None]
+            total_count = len(messages)
+            # Apply pagination manually
+            start = self._current_page * self._page_size
+            messages = messages[start:start + self._page_size]
         
         # Pagination info
         total_pages = (total_count + self._page_size - 1) // self._page_size
@@ -210,12 +222,25 @@ class ArchivePage:
                             f'flat {"disabled" if self._current_page >= total_pages - 1 else ""}'
                         )
             
-            # Messages list
+            # Messages list (single-line format, same as main page)
             if not messages:
                 ui.label('No messages found').classes('text-gray-500 italic mt-4')
             else:
-                for msg_dict in messages:
-                    self._render_message_card(msg_dict, snapshot)
+                with ui.column().classes(
+                    'w-full overflow-y-auto gap-0 text-sm font-mono '
+                    'bg-gray-50 p-2 rounded'
+                ):
+                    for msg_dict in messages:
+                        msg = Message.from_dict(msg_dict)
+                        line = msg.format_line()
+                        msg_hash = msg_dict.get('message_hash', '')
+                        
+                        ui.label(line).classes(
+                            'text-xs leading-tight cursor-pointer '
+                            'hover:bg-blue-50 rounded px-1'
+                        ).on('click', lambda e, h=msg_hash: ui.navigate.to(
+                            f'/route/{h}', new_tab=True,
+                        ) if h else None)
             
             # Pagination footer
             if total_pages > 1:
@@ -227,181 +252,6 @@ class ArchivePage:
                     ui.button('Next', on_click=go_next).props(
                         f'flat {"disabled" if self._current_page >= total_pages - 1 else ""}'
                     )
-    
-    def _render_message_card(self, msg_dict: dict, snapshot: dict):
-        """Render a single message card with route table and reply option.
-        
-        Args:
-            msg_dict: Message dictionary from archive.
-            snapshot: Current snapshot for contact lookup.
-        """
-        # Convert dict to display format (same as messages_panel)
-        time = msg_dict.get('time', '')
-        sender = msg_dict.get('sender', 'Unknown')
-        text = msg_dict.get('text', '')
-        channel = msg_dict.get('channel', 0)
-        direction = msg_dict.get('direction', 'in')
-        snr = msg_dict.get('snr', 0.0)
-        path_len = msg_dict.get('path_len', 0)
-        path_hashes = msg_dict.get('path_hashes', [])
-        
-        # Channel name - use archived channel_name, fallback to index
-        channel_name = msg_dict.get('channel_name', '')
-        if not channel_name:
-            channel_name = f'Ch {channel}' if channel is not None else 'DM'
-        
-        # Direction indicator
-        dir_icon = '📤' if direction == 'out' else '📥'
-        dir_color = 'text-blue-600' if direction == 'out' else 'text-green-600'
-        
-        # Card styling (same as messages_panel)
-        with ui.card().classes('w-full hover:bg-gray-50'):
-            with ui.column().classes('w-full gap-2'):
-                # Main message content
-                with ui.row().classes('w-full items-start gap-2'):
-                    # Time + direction
-                    with ui.column().classes('flex-none w-20'):
-                        ui.label(time).classes('text-xs text-gray-600')
-                        ui.label(dir_icon).classes(f'text-sm {dir_color}')
-                    
-                    # Content
-                    with ui.column().classes('flex-1 gap-1'):
-                        # Sender + channel
-                        with ui.row().classes('gap-2 items-center'):
-                            ui.label(sender).classes('font-bold')
-                            ui.label(f'→ {channel_name}').classes('text-sm text-gray-600')
-                            
-                            if path_len > 0:
-                                ui.label(f'↔ {path_len} hops').classes('text-xs text-gray-500')
-                            
-                            if snr and snr > 0:
-                                snr_color = 'text-green-600' if snr >= 5 else 'text-orange-600' if snr >= 0 else 'text-red-600'
-                                ui.label(f'SNR: {snr:.1f}').classes(f'text-xs {snr_color}')
-                        
-                        # Message text
-                        ui.label(text).classes('text-sm whitespace-pre-wrap')
-                
-                # Route table (expandable)
-                self._render_archive_route(msg_dict, snapshot)
-                
-                # Reply panel (expandable)
-                with ui.expansion('💬 Reply', icon='reply').classes('w-full') as expansion:
-                    expansion.classes('bg-gray-50')
-                    with ui.column().classes('w-full gap-2 p-2'):
-                        # Pre-filled reply text
-                        prefilled = f"@{sender} "
-                        
-                        # Channel selector
-                        ch_options = {}
-                        default_ch = None
-                        
-                        for ch in snapshot.get('channels', []):
-                            ch_idx = ch.get('idx', ch.get('index', 0))
-                            ch_name = ch.get('name', f'Ch {ch_idx}')
-                            ch_options[ch_idx] = f"[{ch_idx}] {ch_name}"
-                            if default_ch is None:
-                                default_ch = ch_idx
-                        
-                        with ui.row().classes('w-full items-center gap-2'):
-                            msg_input = ui.input(
-                                placeholder='Type your reply...',
-                                value=prefilled
-                            ).classes('flex-1')
-                            
-                            ch_select = ui.select(
-                                options=ch_options,
-                                value=default_ch
-                            ).classes('w-40')
-                            
-                            def send_reply(inp=msg_input, sel=ch_select):
-                                reply_text = inp.value
-                                if reply_text:
-                                    self._shared.put_command({
-                                        'action': 'send_message',
-                                        'channel': sel.value,
-                                        'text': reply_text,
-                                    })
-                                    ui.notify(f'Reply sent to {channel_name}', type='positive')
-                                    inp.value = prefilled  # Reset to prefilled
-                                    expansion.open = False  # Close expansion
-                            
-                            ui.button('Send', on_click=send_reply).props('color=primary')
-
-    def _render_archive_route(self, msg_dict: dict, snapshot: dict):
-        """Render an inline route table for an archive message.
-
-        Args:
-            msg_dict: Message dictionary from archive.
-            snapshot: Current snapshot for contact lookup.
-        """
-        with ui.expansion('🗺️ Route', icon='route').classes('w-full') as expansion:
-            expansion.classes('bg-blue-50')
-            with ui.column().classes('w-full gap-1 p-2'):
-                msg = Message.from_dict(msg_dict)
-                route = self._builder.build(msg, snapshot)
-
-                path_nodes = route['path_nodes']
-                sender = route['sender']
-                self_node = route['self_node']
-
-                rows = []
-
-                # Sender row
-                if sender:
-                    rows.append({
-                        'hop': 'Start',
-                        'name': sender.name,
-                        'hash': sender.pubkey[:2].upper() if sender.pubkey else '-',
-                        'type': TYPE_LABELS.get(sender.type, '-'),
-                        'role': '📱 Sender',
-                    })
-                else:
-                    rows.append({
-                        'hop': 'Start',
-                        'name': msg.sender or 'Unknown',
-                        'hash': msg.sender_pubkey[:2].upper() if msg.sender_pubkey else '-',
-                        'type': '-',
-                        'role': '📱 Sender',
-                    })
-
-                # Repeaters
-                for i, node in enumerate(path_nodes):
-                    rows.append({
-                        'hop': str(i + 1),
-                        'name': node.name,
-                        'hash': node.pubkey[:2].upper() if node.pubkey else '-',
-                        'type': TYPE_LABELS.get(node.type, '-'),
-                        'role': '📡 Repeater',
-                    })
-
-                # Placeholder rows for unresolved hops
-                if not path_nodes and 0 < msg.path_len < 255:
-                    for i in range(msg.path_len):
-                        rows.append({
-                            'hop': str(i + 1),
-                            'name': '-', 'hash': '-', 'type': '-',
-                            'role': '📡 Repeater',
-                        })
-
-                # Receiver (self)
-                rows.append({
-                    'hop': 'End',
-                    'name': self_node.name,
-                    'hash': '-',
-                    'type': 'Companion',
-                    'role': '📱 Receiver' if msg.direction == 'in' else '📱 Sender',
-                })
-
-                ui.table(
-                    columns=[
-                        {'name': 'hop', 'label': 'Hop', 'field': 'hop', 'align': 'center'},
-                        {'name': 'role', 'label': 'Role', 'field': 'role'},
-                        {'name': 'name', 'label': 'Name', 'field': 'name'},
-                        {'name': 'hash', 'label': 'ID', 'field': 'hash', 'align': 'center'},
-                        {'name': 'type', 'label': 'Type', 'field': 'type'},
-                    ],
-                    rows=rows,
-                ).props('dense flat bordered').classes('w-full')
     
     @staticmethod
     def setup_route(shared: SharedDataReadAndLookup):

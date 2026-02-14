@@ -11,7 +11,7 @@ v4.1 changes
   :class:`~meshcore_gui.models.RouteNode` instead of plain dicts.
 """
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from nicegui import ui
 
@@ -38,15 +38,44 @@ class RoutePage:
     # Public
     # ------------------------------------------------------------------
 
-    def render(self, msg_index: int) -> None:
+    def render(self, msg_key: str) -> None:
+        """Render the route page for a message.
+
+        *msg_key* is either a numeric index (from the main page) or
+        a message hash (from the archive page).  Numeric indices are
+        resolved from the in-memory message list; hashes are looked up
+        in the persistent archive as fallback.
+        """
         data = self._shared.get_snapshot()
         messages: List[Message] = data['messages']
+        msg: Optional[Message] = None
 
-        if msg_index < 0 or msg_index >= len(messages):
+        # Strategy 1: numeric index (main page click)
+        try:
+            idx = int(msg_key)
+            if 0 <= idx < len(messages):
+                msg = messages[idx]
+        except (ValueError, TypeError):
+            pass
+
+        # Strategy 2: message hash lookup in memory
+        if msg is None and msg_key:
+            for m in messages:
+                if m.message_hash and m.message_hash == msg_key:
+                    msg = m
+                    break
+
+        # Strategy 3: archive fallback (hash)
+        if msg is None and msg_key:
+            archive = data.get('archive')
+            if archive:
+                msg_dict = archive.get_message_by_hash(msg_key)
+                if msg_dict:
+                    msg = Message.from_dict(msg_dict)
+
+        if msg is None:
             ui.label('❌ Message not found').classes('text-xl p-8')
             return
-
-        msg = messages[msg_index]
         route = self._builder.build(msg, data)
 
         ui.page_title(f'Route — {msg.sender or "Unknown"}')

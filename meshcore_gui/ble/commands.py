@@ -7,7 +7,6 @@ code (Open/Closed Principle).
 """
 
 import asyncio
-from datetime import datetime
 from typing import Dict, List, Optional
 
 from meshcore import MeshCore, EventType
@@ -79,12 +78,8 @@ class CommandHandler:
         if text:
             await self._mc.commands.send_chan_msg(channel, text)
             if not is_bot:
-                self._shared.add_message(Message(
-                    time=datetime.now().strftime('%H:%M:%S'),
-                    sender='Me',
-                    text=text,
-                    channel=channel,
-                    direction='out',
+                self._shared.add_message(Message.outgoing(
+                    text, channel,
                 ))
             debug_print(
                 f"{'BOT' if is_bot else 'Sent'} message to "
@@ -97,13 +92,8 @@ class CommandHandler:
         contact_name = cmd.get('contact_name', pubkey[:8])
         if text and pubkey:
             await self._mc.commands.send_msg(pubkey, text)
-            self._shared.add_message(Message(
-                time=datetime.now().strftime('%H:%M:%S'),
-                sender='Me',
-                text=text,
-                channel=None,
-                direction='out',
-                sender_pubkey=pubkey,
+            self._shared.add_message(Message.outgoing(
+                text, None, sender_pubkey=pubkey,
             ))
             debug_print(f"Sent DM to {contact_name}: {text[:30]}")
 
@@ -532,13 +522,8 @@ class CommandHandler:
 
         try:
             await self._mc.commands.send_msg(pubkey, text)
-            self._shared.add_message(Message(
-                time=datetime.now().strftime('%H:%M:%S'),
-                sender='Me',
-                text=text,
-                channel=None,
-                direction='out',
-                sender_pubkey=pubkey,
+            self._shared.add_message(Message.outgoing(
+                text, None, sender_pubkey=pubkey,
             ))
             debug_print(
                 f"send_room_msg: sent to {room_name}: "
