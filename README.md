@@ -26,7 +26,7 @@ This project provides a **native desktop GUI** that connects to your MeshCore de
 
 Under the hood it uses `bleak` for Bluetooth Low Energy (which talks to BlueZ on Linux, CoreBluetooth on macOS, and WinRT on Windows), `meshcore` as the protocol layer, `meshcoredecoder` for raw LoRa packet decryption and route extraction, and `NiceGUI` for the web-based interface.
 
-> **Linux users:** BLE on Linux can be temperamental. BlueZ occasionally gets into a bad state, especially after repeated connect/disconnect cycles. If you run into connection issues, see the [Troubleshooting Guide](docs/TROUBLESHOOTING.md). On macOS and Windows, BLE is generally more stable out of the box.
+> **Linux users:** BLE on Linux can be temperamental. BlueZ occasionally gets into a bad state, especially after repeated connect/disconnect cycles. If your MeshCore device has BLE PIN pairing enabled, a `bt-agent` service must be running to handle pairing — see step 5 under Installation. It is also recommended to run `bluetoothctl remove <address>` before each start to clear stale bonds. If you run into connection issues, see the [Troubleshooting Guide](docs/TROUBLESHOOTING.md). On macOS and Windows, BLE is generally more stable out of the box.
 
 
 ## Features
@@ -80,13 +80,13 @@ Under the hood it uses `bleak` for Bluetooth Low Energy (which talks to BlueZ on
 **Linux (Ubuntu/Debian):**
 ```bash
 sudo apt update
-sudo apt install python3-pip python3-venv bluetooth bluez
+sudo apt install python3-pip python3-venv bluetooth bluez bluez-tools
 ```
 
 **Raspberry Pi (Raspberry Pi OS Lite):**
 ```bash
 sudo apt update
-sudo apt install python3-pip python3-venv bluetooth bluez git
+sudo apt install python3-pip python3-venv bluetooth bluez bluez-tools git
 sudo usermod -aG bluetooth $USER
 ```
 
@@ -127,6 +127,60 @@ venv\Scripts\activate
 ```bash
 pip install nicegui meshcore bleak meshcoredecoder
 ```
+
+### 5. BLE PIN Agent setup (Linux — recommended for Raspberry Pi)
+
+If your MeshCore device has BLE PIN pairing enabled (e.g., PIN `123456`), the `bleak` library cannot handle the passkey exchange by itself. A BlueZ agent must be running to respond to pairing requests. Without this agent, BLE connections will fail with `failed to discover services, device disconnected`.
+
+> **Note:** This is particularly important on Raspberry Pi and other headless Linux systems. On macOS and Windows, BLE pairing is handled natively by the OS. If your MeshCore device does not have PIN pairing enabled, you can skip this step.
+
+Create a PIN file:
+
+```bash
+echo "* 123456" > ~/.meshcore-ble-pin
+chmod 600 ~/.meshcore-ble-pin
+```
+
+Replace `123456` with your device's actual BLE PIN. The `*` matches any device address. For a specific device, use its MAC address instead:
+
+```
+FF:05:D6:71:83:8D 123456
+```
+
+Create a systemd service so the agent starts automatically on boot:
+
+```bash
+sudo tee /etc/systemd/system/bt-agent.service << 'EOF'
+[Unit]
+Description=Bluetooth PIN Agent for MeshCore
+After=bluetooth.service
+Requires=bluetooth.service
+
+[Service]
+ExecStart=/usr/bin/bt-agent -c KeyboardOnly -p /home/YOUR_USERNAME/.meshcore-ble-pin
+Restart=always
+User=YOUR_USERNAME
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+Replace `YOUR_USERNAME` with your actual username, then enable and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable bt-agent
+sudo systemctl start bt-agent
+```
+
+Verify it is running:
+
+```bash
+sudo systemctl status bt-agent
+```
+
+> **Important:** Only run one `bt-agent` instance. Multiple agents conflict with each other. If you also start `bt-agent` manually from the command line while the systemd service is running, they will interfere.
 
 ## Usage
 
@@ -177,6 +231,14 @@ If you want to cache the discovered channel list to disk (for faster startup), s
 
 ### 4. Start the GUI
 
+Before starting the GUI, remove any existing BLE bond to ensure a clean connection. This prevents stale pairing state from blocking the connection:
+
+```bash
+bluetoothctl remove AA:BB:CC:DD:EE:FF
+```
+
+Then start the GUI:
+
 ```bash
 python meshcore_gui.py AA:BB:CC:DD:EE:FF
 ```
@@ -203,13 +265,16 @@ Install the application on your headless device (e.g. a Raspberry Pi) following 
 
 ### Starting the application
 
+Remove any stale BLE bond first, then start:
+
 ```bash
 cd ~/meshcore-gui
 source venv/bin/activate
-nohup python meshcore_gui.py AA:BB:CC:DD:EE:FF --debug-on > /dev/null 2>&1 &
+bluetoothctl remove AA:BB:CC:DD:EE:FF
+nohup python meshcore_gui.py AA:BB:CC:DD:EE:FF --debug-on > ~/meshcore.log 2>&1 &
 ```
 
-`nohup` keeps the application running after you close your SSH session. Debug output is automatically written to a rotating log file at `~/.meshcore-gui/logs/meshcore_gui.log` (max 20 MB, rotates automatically). No separate log file redirection is needed.
+`nohup` keeps the application running after you close your SSH session. Redirecting to `~/meshcore.log` preserves output for debugging; avoid redirecting to `/dev/null` as it hides connection errors. Debug output is also written to a rotating log file at `~/.meshcore-gui/logs/meshcore_gui.log` (max 20 MB, rotates automatically).
 
 ### Accessing the interface
 
@@ -234,14 +299,15 @@ sudo nano /etc/systemd/system/meshcore-gui.service
 ```ini
 [Unit]
 Description=MeshCore GUI - BLE Mesh Network Dashboard
-After=network.target bluetooth.target
-Wants=bluetooth.target
+After=network.target bluetooth.target bt-agent.service
+Wants=bluetooth.target bt-agent.service
 
 [Service]
 Type=simple
 User=your-username
 WorkingDirectory=/home/your-username/meshcore-gui
-ExecStart=/home/your-username/meshcore-gui/venv/bin/python meshcore_gui.py literal:AA:BB:CC:DD:EE:FF
+ExecStartPre=/usr/bin/bluetoothctl remove AA:BB:CC:DD:EE:FF
+ExecStart=/home/your-username/meshcore-gui/venv/bin/python meshcore_gui.py AA:BB:CC:DD:EE:FF
 Restart=always
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1
@@ -250,7 +316,7 @@ Environment=PYTHONUNBUFFERED=1
 WantedBy=multi-user.target
 ```
 
-Replace `your-username` and `AA:BB:CC:DD:EE:FF` with your actual username and BLE device address.
+Replace `your-username` and `AA:BB:CC:DD:EE:FF` with your actual username and BLE device address. The `ExecStartPre` removes any stale BLE bond before each start. The `bt-agent.service` dependency ensures the BLE PIN agent is running before the GUI starts (see step 5 under Installation).
 
 ```bash
 sudo systemctl daemon-reload
@@ -281,6 +347,8 @@ Make sure your user is in the `bluetooth` group:
 ```bash
 sudo usermod -aG bluetooth $USER
 ```
+
+If your MeshCore device has BLE PIN pairing enabled, make sure the `bt-agent` systemd service is installed and running (see step 5 under Installation). Without it, BLE connections will fail silently on headless systems.
 
 ## Configuration
 
@@ -523,15 +591,21 @@ For comprehensive Linux BLE troubleshooting (including the `EOFError` / `start_n
 
 ##### GUI remains empty / BLE connection fails
 
-1. First disconnect any existing BLE connections:
+1. First remove any stale BLE bond:
    ```bash
-   bluetoothctl disconnect AA:BB:CC:DD:EE:FF
+   bluetoothctl remove AA:BB:CC:DD:EE:FF
    ```
-2. Wait 2 seconds:
+2. Ensure the BLE PIN agent is running (if PIN pairing is enabled):
    ```bash
-   sleep 2
+   sudo systemctl status bt-agent
    ```
-3. Restart the GUI:
+   If not running: `sudo systemctl start bt-agent`
+3. Kill any existing GUI instance and free the port:
+   ```bash
+   pkill -9 -f meshcore_gui
+   sleep 3
+   ```
+4. Restart the GUI:
    ```bash
    python meshcore_gui.py AA:BB:CC:DD:EE:FF
    ```
