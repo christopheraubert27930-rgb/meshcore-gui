@@ -89,7 +89,7 @@ class EventHandler:
         time_str = Message.now_timestamp()
         snr = payload.get('snr', 0)
         rssi = payload.get('rssi', 0)
-        payload_type = payload.get('payload_type', '?')
+        payload_type = '?'
         hops = payload.get('path_len', 0)
         
         # Try to decode payload to get message_hash
@@ -99,6 +99,7 @@ class EventHandler:
             decoded = self._decoder.decode(payload_hex)
             if decoded is not None:
                 message_hash = decoded.message_hash
+                payload_type = self._decoder.get_payload_type_text(decoded.payload_type)
 
                 # Cache path_hashes for correlation with on_channel_msg
                 if decoded.path_hashes and message_hash:

@@ -21,6 +21,7 @@ from meshcoredecoder.crypto.channel_crypto import ChannelCrypto
 from meshcoredecoder.crypto.key_manager import MeshCoreKeyStore
 from meshcoredecoder.types.crypto import DecryptionOptions
 from meshcoredecoder.types.enums import PayloadType
+from meshcoredecoder.utils.enum_names import get_payload_type_name
 
 from meshcore_gui.config import debug_print
 
@@ -199,6 +200,10 @@ class PacketDecoder:
 
         return result
 
+    def get_payload_type_text(self, payload_type: PayloadType) -> str:
+        """Get human-friendly name for a PayloadType enum value."""
+        return get_payload_type_name(payload_type)
+    
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
@@ -206,3 +211,5 @@ class PacketDecoder:
     def _rebuild_options(self) -> None:
         """Recreate DecryptionOptions after a key change."""
         self._options = DecryptionOptions(key_store=self._key_store)
+
+
