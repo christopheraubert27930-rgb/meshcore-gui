@@ -47,10 +47,10 @@ from typing import Dict, List, Optional, Set
 
 from meshcore import MeshCore, EventType
 
+import meshcore_gui.config as _config
 from meshcore_gui.config import (
     BLE_DEFAULT_TIMEOUT,
     BLE_LIB_DEBUG,
-    BLE_PIN,
     CHANNEL_CACHE_ENABLED,
     CONTACT_REFRESH_SECONDS,
     MAX_CHANNELS,
@@ -94,7 +94,7 @@ class BLEWorker:
         self._disconnected = False
 
         # BLE PIN agent (replaces external bt-agent.service)
-        self._agent = BleAgentManager(pin=BLE_PIN)
+        self._agent = BleAgentManager(pin=_config.BLE_PIN)
 
         # Local cache (one file per device)
         self._cache = DeviceCache(address)

@@ -8,6 +8,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) and [Semantic Ver
 
 ---
 
+## [1.9.3] - 2026-02-16 — CLI Arguments & BLE PIN Fix
+
+### Fixed
+- 🛠 **BLE PIN not applied from CLI** — `ble/worker.py` imported `BLE_PIN` as a constant at module load time (`from config import BLE_PIN`), capturing the default value `"123456"` before CLI parsing could override `config.BLE_PIN`. Changed to runtime access via `config.BLE_PIN` so the `--ble-pin` parameter is correctly passed to the BLE agent
+
+### Added
+- ✅ **`--ble-pin` CLI argument** — All three entry points now accept `--ble-pin PIN` or `--ble-pin=PIN` to override the BLE pairing PIN at startup without editing `config.py`
+- ✅ **`--port` CLI argument** — All three entry points now accept `--port PORT` or `--port=PORT` to set the web UI port (default: 8081). Previously hardcoded in `ui.run()`
+- ✅ **Improved CLI argument parser** — Replaced simple flag list with a proper parser that handles both `--key value` and `--key=value` formats. Correctly skips flag values so they are not mistaken for positional arguments
+
+### Changed
+- 🔄 `ble/worker.py`: Removed `BLE_PIN` from value-imports; added `import meshcore_gui.config as _config`; `BleAgentManager` now reads `_config.BLE_PIN` at runtime instead of the import-time copy
+- 🔄 `meshcore_gui.py` (root), `__main__.py`, `meshcore_gui/meshcore_gui.py`: Rewritten argument parser supporting `--key=value` format; added `--ble-pin` and `--port` arguments; startup banner now shows BLE PIN and port; `ui.run()` uses `ui_port` variable instead of hardcoded `8081`
+- 🔄 `config.py`: Version bumped to `1.9.3`
+
+### Impact
+- BLE PIN from `--ble-pin` CLI argument is now correctly used for pairing
+- Web UI port is configurable without code changes
+- All `--key=value` and `--key value` formats work consistently
+- No breaking changes — defaults unchanged (PIN: `123456`, port: `8081`)
+
+---
+
 ## [1.9.2] - 2026-02-16 — Bugfix: Map Default Location & Payload Type Decoding
 
 ### Fixed

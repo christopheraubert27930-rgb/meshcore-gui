@@ -76,34 +76,62 @@ def main():
     """
     global _shared, _dashboard, _route_page, _archive_page
 
-    # Parse arguments
-    args = [a for a in sys.argv[1:] if not a.startswith('--')]
-    flags = [a for a in sys.argv[1:] if a.startswith('--')]
+    # Parse arguments — handles both --flag value and --flag=value formats
+    args = []
+    flags = {}   # key → value (or True for boolean flags)
+    argv = sys.argv[1:]
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if '=' in a and a.startswith('--'):
+            key, value = a.split('=', 1)
+            flags[key] = value
+        elif a == '--ble-pin':
+            if i + 1 < len(argv):
+                flags['--ble-pin'] = argv[i + 1]
+                i += 1
+            else:
+                flags['--ble-pin'] = True
+        elif a.startswith('--'):
+            flags[a] = True
+        else:
+            args.append(a)
+        i += 1
 
     if not args:
         print("MeshCore GUI - Threaded BLE Edition")
         print("=" * 40)
-        print("Usage: python meshcore_gui.py <BLE_ADDRESS> [--debug-on]")
+        print("Usage: python meshcore_gui.py <BLE_ADDRESS> [--debug-on] [--ble-pin PIN]")
         print("Example: python meshcore_gui.py literal:AA:BB:CC:DD:EE:FF")
         print("         python meshcore_gui.py literal:AA:BB:CC:DD:EE:FF --debug-on")
+        print("         python meshcore_gui.py literal:AA:BB:CC:DD:EE:FF --ble-pin 654321")
+        print("         python meshcore_gui.py literal:AA:BB:CC:DD:EE:FF --ble-pin=654321")
         print()
         print("Options:")
-        print("  --debug-on    Enable verbose debug logging")
+        print("  --debug-on       Enable verbose debug logging")
+        print("  --ble-pin PIN    BLE pairing PIN (default: config.BLE_PIN)")
+        print("  --port PORT      Web UI port (default: 8081)")
         print()
         print("Tip: Use 'bluetoothctl scan on' to find devices")
         sys.exit(1)
 
     ble_address = args[0]
 
-    # Apply --debug-on flag
+    # Apply flags
     if '--debug-on' in flags:
         config.DEBUG = True
+    if '--ble-pin' in flags and flags['--ble-pin'] is not True:
+        config.BLE_PIN = flags['--ble-pin']
+
+    ui_port = int(flags.get('--port', 8081))
 
     # Startup banner
     print("=" * 50)
     print("MeshCore GUI - Threaded BLE Edition")
     print("=" * 50)
     print(f"Device:     {ble_address}")
+    print(f"BLE PIN:    {config.BLE_PIN}")
+    print(f"Port:       {ui_port}")
     print(f"Debug mode: {'ON' if config.DEBUG else 'OFF'}")
     print("=" * 50)
 
@@ -120,7 +148,7 @@ def main():
     worker.start()
 
     # Start NiceGUI server (blocks)
-    ui.run(show=False, title='MeshCore', host='0.0.0.0', port=8081, reload=False, storage_secret='meshcore-gui-secret')
+    ui.run(show=False, title='MeshCore', host='0.0.0.0', port=ui_port, reload=False, storage_secret='meshcore-gui-secret')
 
 
 if __name__ == "__main__":

@@ -151,7 +151,7 @@ sudo tee /etc/dbus-1/system.d/meshcore-ble.conf << EOF
 EOF
 ```
 
-The PIN is configured via `BLE_PIN` in `meshcore_gui/config.py` (default: `123456`).
+The PIN is configured via `BLE_PIN` in `meshcore_gui/config.py` (default: `123456`), or overridden at startup with `--ble-pin`.
 
 > **Migrating from bt-agent:** If you previously used `bt-agent.service` for PIN pairing, it is no longer needed. Remove it:
 > ```bash
@@ -221,9 +221,23 @@ For verbose debug logging:
 python meshcore_gui.py AA:BB:CC:DD:EE:FF --debug-on
 ```
 
+To override the BLE pairing PIN (default: `123456`):
+
+```bash
+python meshcore_gui.py AA:BB:CC:DD:EE:FF --ble-pin=171227
+```
+
+To run on a different port (default: `8081`):
+
+```bash
+python meshcore_gui.py AA:BB:CC:DD:EE:FF --debug-on --ble-pin=171227 --port=8082
+```
+
+All `--key=value` and `--key value` formats are supported.
+
 ### 5. Open the interface
 
-The GUI opens automatically in your browser at `http://localhost:8080`
+The GUI opens automatically in your browser at `http://localhost:8081` (or the port specified with `--port`)
 
 ## Running Headless on Your Local Network
 
@@ -248,10 +262,10 @@ nohup python meshcore_gui.py AA:BB:CC:DD:EE:FF --debug-on > ~/meshcore.log 2>&1 
 Open a browser on any device on your local network and navigate to:
 
 ```
-http://<hostname-or-ip>:8080
+http://<hostname-or-ip>:8081
 ```
 
-For example: `http://raspberrypi5nas:8080` or `http://192.168.2.234:8080`
+For example: `http://raspberrypi5nas:8081` or `http://192.168.2.234:8081`
 
 This works from any device on the same network — desktop, laptop, tablet or phone.
 
@@ -332,13 +346,15 @@ If your MeshCore device has BLE PIN pairing enabled, make sure the D-Bus policy 
 | `DEBUG` | `meshcore_gui/config.py` | Set to `True` for verbose logging (or use `--debug-on`) |
 | `MAX_CHANNELS` | `meshcore_gui/config.py` | Maximum channel slots to probe on device (default: 8) |
 | `CHANNEL_CACHE_ENABLED` | `meshcore_gui/config.py` | Cache discovered channels to disk for faster startup (default: `False` — always fresh from device) |
-| `BLE_PIN` | `meshcore_gui/config.py` | BLE pairing PIN for the MeshCore device (default: `123456`) |
+| `BLE_PIN` | `meshcore_gui/config.py` | BLE pairing PIN for the MeshCore device (default: `123456`). Override at startup with `--ble-pin` |
 | `RECONNECT_MAX_RETRIES` | `meshcore_gui/config.py` | Maximum reconnect attempts after a BLE disconnect (default: 5) |
 | `RECONNECT_BASE_DELAY` | `meshcore_gui/config.py` | Base delay in seconds between reconnect attempts, multiplied by attempt number (default: 5.0) |
 | `CONTACT_REFRESH_SECONDS` | `meshcore_gui/config.py` | Interval between periodic contact refreshes (default: 300s / 5 minutes) |
 | `MESSAGE_RETENTION_DAYS` | `meshcore_gui/config.py` | Retention period for archived messages (default: 30 days) |
 | `RXLOG_RETENTION_DAYS` | `meshcore_gui/config.py` | Retention period for archived RX log entries (default: 7 days) |
 | `CONTACT_RETENTION_DAYS` | `meshcore_gui/config.py` | Retention period for cached contacts (default: 90 days) |
+| `DEFAULT_MAP_CENTER` | `meshcore_gui/config.py` | Default map centre before device reports GPS (default: Zwolle `(52.5168, 6.0830)`) |
+| `DEFAULT_MAP_ZOOM` | `meshcore_gui/config.py` | Default zoom level for all Leaflet maps (default: 9) |
 | `KEY_RETRY_INTERVAL` | `meshcore_gui/ble/worker.py` | Interval between background retry attempts for missing channel keys (default: 30s) |
 | `BOT_DEVICE_NAME` | `meshcore_gui/config.py` | Device name set when bot mode is active (default: `;NL-OV-ZWL-STDSHGN-WKC Bot`) |
 | `BOT_CHANNELS` | `meshcore_gui/services/bot.py` | Channel indices the bot listens on |
@@ -346,6 +362,9 @@ If your MeshCore device has BLE PIN pairing enabled, make sure the D-Bus policy 
 | `BOT_KEYWORDS` | `meshcore_gui/services/bot.py` | Keyword → reply template mapping |
 | Room passwords | `~/.meshcore-gui/room_passwords/<ADDRESS>.json` | Per-device Room Server passwords (managed via GUI, stored outside repository) |
 | BLE Address | Command line argument | Device MAC address (or UUID on macOS) |
+| `--ble-pin` | Command line argument | Override BLE pairing PIN at startup (default: `config.BLE_PIN`) |
+| `--port` | Command line argument | Override web UI port at startup (default: `8081`) |
+| `--debug-on` | Command line argument | Enable verbose debug logging |
 
 ## Functionality
 
@@ -647,6 +666,12 @@ Enable via command line flag:
 python meshcore_gui.py AA:BB:CC:DD:EE:FF --debug-on
 ```
 
+Full example with all options:
+
+```bash
+python meshcore_gui.py AA:BB:CC:DD:EE:FF --debug-on --ble-pin=171227 --port=8082
+```
+
 Or set `DEBUG = True` in `meshcore_gui/config.py`.
 
 ### Project structure
@@ -660,7 +685,7 @@ meshcore-gui/
 ├── meshcore_gui/                    # Application package
 │   ├── __init__.py
 │   ├── __main__.py                  # Alternative entry: python -m meshcore_gui
-│   ├── config.py                    # DEBUG flag, channel discovery settings (MAX_CHANNELS, CHANNEL_CACHE_ENABLED), BLE_PIN, RECONNECT_* settings, refresh interval, retention settings, BOT_DEVICE_NAME
+│   ├── config.py                    # DEBUG flag, channel discovery settings (MAX_CHANNELS, CHANNEL_CACHE_ENABLED), BLE_PIN, RECONNECT_* settings, refresh interval, retention settings, BOT_DEVICE_NAME, DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM
 │   ├── ble/                         # BLE communication layer
 │   │   ├── __init__.py
 │   │   ├── worker.py                # BLE thread, connection lifecycle, cache-first startup, disconnect detection, auto-reconnect, background key retry
