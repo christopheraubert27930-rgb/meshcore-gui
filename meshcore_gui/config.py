@@ -24,7 +24,7 @@ from typing import Any, Dict, List
 # VERSION
 # ==============================================================================
 
-VERSION: str = "1.9.3"
+VERSION: str = "1.9.4"
 
 
 # ==============================================================================
@@ -56,6 +56,7 @@ DATA_DIR: Path = Path.home() / ".meshcore-gui"
 LOG_DIR: Path = DATA_DIR / "logs"
 
 # Log file path (rotating: max 5 MB per file, 3 backups = 20 MB total).
+# Updated at runtime by ``configure_log_file()`` to include the BLE address.
 LOG_FILE: Path = LOG_DIR / "meshcore_gui.log"
 
 # Maximum size per log file in bytes (5 MB).
@@ -63,6 +64,39 @@ LOG_MAX_BYTES: int = 5 * 1024 * 1024
 
 # Number of rotated backup files to keep.
 LOG_BACKUP_COUNT: int = 3
+
+
+def _sanitize_ble_address(ble_address: str) -> str:
+    """Sanitize a BLE address for use in a filename.
+
+    Strips the ``literal:`` prefix (if present) and replaces colons
+    with underscores so the result is safe for all file-systems.
+
+    Args:
+        ble_address: Raw BLE address string, e.g. ``literal:AA:BB:CC:DD:EE:FF``.
+
+    Returns:
+        Sanitized string, e.g. ``AA_BB_CC_DD_EE_FF``.
+    """
+    addr = ble_address
+    if addr.lower().startswith("literal:"):
+        addr = addr[len("literal:"):]
+    return addr.replace(":", "_")
+
+
+def configure_log_file(ble_address: str) -> None:
+    """Set the log file path to include the BLE address as prefix.
+
+    Must be called **before** the first ``debug_print()`` call so the
+    file logger is created with the correct path.  Typically invoked
+    from ``main()`` right after parsing the CLI arguments.
+
+    Args:
+        ble_address: Raw BLE address from the command line.
+    """
+    global LOG_FILE
+    sanitized = _sanitize_ble_address(ble_address)
+    LOG_FILE = LOG_DIR / f"{sanitized}_meshcore_gui.log"
 
 
 # ==============================================================================

@@ -126,6 +126,9 @@ def main():
 
     ui_port = int(flags.get('--port', 8081))
 
+    # Configure BLE-address-prefixed log file BEFORE any debug output
+    config.configure_log_file(ble_address)
+
     # Startup banner
     print("=" * 50)
     print("MeshCore GUI - Threaded BLE Edition")

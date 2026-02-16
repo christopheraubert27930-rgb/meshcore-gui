@@ -8,6 +8,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) and [Semantic Ver
 
 ---
 
+## [1.9.4] - 2026-02-16 — BLE Address Log Prefix & Entry Point Cleanup
+
+### Added
+- ✅ **BLE address prefix in log filename** — Log file is now named `<BLE_ADDRESS>_meshcore_gui.log` (e.g. `AA_BB_CC_DD_EE_FF_meshcore_gui.log`) instead of the generic `meshcore_gui.log`. Makes it easy to identify which device produced which log file when running multiple instances
+  - New helper `_sanitize_ble_address()` strips `literal:` prefix and replaces colons with underscores
+  - New function `configure_log_file(ble_address)` updates `LOG_FILE` at runtime before the logger is initialised
+  - Rotated backups follow the same naming pattern automatically
+
+### Removed
+- ❌ **`meshcore_gui/meshcore_gui.py`** — Redundant copy of `main()` that was never imported. All three entry points (`meshcore_gui.py` root, `__main__.py`, and `meshcore_gui/meshcore_gui.py`) contained near-identical copies of the same logic, causing changes to be missed (as demonstrated by this fix). `__main__.py` is now the single source of truth; root `meshcore_gui.py` is a thin wrapper that imports from it
+
+### Changed
+- 🔄 `config.py`: Added `_sanitize_ble_address()` and `configure_log_file()`; version bumped to `1.9.4`
+- 🔄 `__main__.py`: Added `config.configure_log_file(ble_address)` call before any debug output
+- 🔄 `meshcore_gui.py` (root): Reduced to 4-line wrapper importing `main` from `__main__`
+
+### Impact
+- Log files are now identifiable per BLE device
+- Single source of truth for `main()` eliminates future sync issues between entry points
+- Both startup methods (`python meshcore_gui.py` and `python -m meshcore_gui`) remain functional
+- No breaking changes — defaults and all existing behaviour unchanged
+
+---
+
 ## [1.9.3] - 2026-02-16 — CLI Arguments & BLE PIN Fix
 
 ### Fixed
