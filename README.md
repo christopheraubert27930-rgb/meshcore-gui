@@ -296,7 +296,7 @@ Wants=bluetooth.target
 Type=simple
 User=your-username
 WorkingDirectory=/home/your-username/meshcore-gui
-ExecStart=/home/your-username/meshcore-gui/venv/bin/python meshcore_gui.py AA:BB:CC:DD:EE:FF --debug-on
+ExecStart=/home/your-username/meshcore-gui/venv/bin/python meshcore_gui.py AA:BB:CC:DD:EE:FF --debug-on --port=8082 ble-pin=654321
 Restart=on-failure
 RestartSec=30
 Environment=DBUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/dbus/system_bus_socket
